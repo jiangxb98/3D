@@ -1,0 +1,41 @@
+FROM 172.16.0.26:5000/devbase:py37cu111pytorch182   #基础镜像
+
+ENV PATH=/usr/local/cuda-11.1/bin:$PATH
+ARG FORCE_CUDA="1" TORCH_CUDA_ARCH_LIST="7.5 8.6+PTX" DEBIAN_FRONTEND=noninteractive    #这个的作用是可以调用命令行
+COPY sources.list /etc/apt/sources.list #这个是换源
+RUN apt-get update \    # 这个是安装一些必要的软件
+    && apt-get install -y wget git ffmpeg libsm6 libxext6 git ninja-build libglib2.0-0 libsm6 libxrender-dev libxext6 openssh-server tmux htop\
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN sed -i \    #sed是linux的一个命令，-i 表示修改源文件，主要是用于登录验证的
+        -e 's/^#*\(PermitRootLogin\) .*/\1 yes/' \
+        -e 's/^#*\(Port\) .*/\1 22/' \
+        -e 's/^#*\(PasswordAuthentication\) .*/\1 no/' \
+        -e 's/^#*\(PermitEmptyPasswords\) .*/\1 no/' \
+        -e 's/^#*\(UsePAM\) .*/\1 no/' \
+        /etc/ssh/sshd_config \
+    && mkdir /root/.ssh \
+    && /bin/echo -e "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDfH7n9plNOLGU7Nd6ddbgZUbj2YoGa1tQT4X1dgpoSdwJWyuXTZJ/SqXgE7xqcvdRb1RisOQO5AvOIH0o9WHCPRiIxwC3HEDMeTBTvIRI0bgoqmVMrXsxDPvwgP4a+U+zqjt99C72N+KHZxOf5DLCKX6G5Y7YK2iqTmBRKC98CK1kwnUUIBXhAFw+noc8Ko0fFVkNwg/C5cEGU/YFqXxe5wx7aSMNq3hD8MLqLvZSB/v2+QZRQ478jN7EM6h2h8sUxWCRHYUlP+XL15JSHzKjn52CQJ7GlPTtpwiz0W2z8WOzOC/0Y7gyer0XJ39wY6fKLwZ8GMQV0VamtPmZoVQ7whEydwXvLJeAazUJZnEAWzPacWG4rRrkWNP7UUf+JXBxjW8QyEwA95jpqBz5VnG4r+Qu1ESxxJarBtkrFwALGB/6Vg95vCKqEdpsZJXYUCMq0hoxnvCFWBqkjqx/t1hIwH5ZYI4SLcPyON07Sz2RjGp617usTPEZKzT+UBMjm5xk= 1587884826@qq.com" >> /root/.ssh/authorized_keys \
+    && /bin/echo -e "set -g mouse on" >> /root/.tmux.conf
+
+SHELL ["/root/miniconda3/condabin/conda", "run", "-n", "base", "/bin/bash", "-c"] # 运行conda环境
+
+RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn mmcv-full==1.6.0
+RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn mmsegmentation==0.27.0
+RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn mmdet==2.25.1
+RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn mmdet3d==1.0.0rc3
+RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn spconv-cu111
+RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn open3d minio==7.1.11 pymongo==3.12.3
+RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn waymo-open-dataset-tf-2-1-0==1.2.0
+
+ARG COWA3D_VER=unknown
+
+RUN git clone https://git.cowarobot.com/zhanggefan/mmdet3d-cowa-ng.git /cowa3d \
+    && cd /cowa3d && git checkout research_lmdb && ln -s /deepdata/jgf_work_dirs/3d/ work_dirs && \
+    pip install --no-cache-dir -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn -e .
+COPY waymo_utils/* /cowa3d/research/refactor/datasets/waymo_utils/
+
+RUN pip cache purge && conda clean --all #清除缓存
+
+WORKDIR /cowa3d
