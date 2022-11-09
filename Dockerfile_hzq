@@ -1,0 +1,19 @@
+# FROM 172.16.0.26:5000/ubuntu1804_cuda111_torch:v1 
+FROM 172.16.0.26:5000/devbase:py37cu111pytorch182
+
+ENV PATH=/usr/local/cuda-11.1/bin:$PATH
+ARG FORCE_CUDA="1" TORCH_CUDA_ARCH_LIST="7.5 8.6+PTX"
+# SHELL ["/root/anaconda3/bin/conda", "run", "-n", "base", "/bin/bash", "-c"]
+
+WORKDIR /workspace
+
+ADD sshd_config /etc/ssh/sshd_config
+ADD start_ssh.sh /root/
+RUN echo "" >> ~/.bashrc && \
+    echo "# startup run" >> ~/.bashrc && \
+    echo "if [ -f /root/start_ssh.sh ]; then" >> ~/.bashrc && \
+    echo "bash /root/start_ssh.sh" >> ~/.bashrc && \
+    echo "fi" >> ~/.bashrc
+RUN mkdir ~/.ssh && echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC/FZpfCmJLpmdgUtsyk0wqh9t8Dyf4rskcTdzSCUp13KGTzTvmt5ol0rXTRm/SaizlSuAz3veeptjku7fIujyE85R2HGVz+LUs3XdQ8qmsJNXjpYNpbOVt9upY8uF4GPBFviQiQazAWm5Z8j7+6HlhpS5aGw6//TGZCwo2nHwom0cWzjFFTJXyue0y4kflrgxbZ5q7930VGeXkULF8Dju84ZhaQ8u4xH9gqTvymPjkXADrUdXBy+cjrcqv2oP8Krkm1F/2RXYmN4lu2jBUPBo+0xJLw3xF8AOJPjocdk6ACGXc1mb1yiCjIzrXjK99Dt2YpiArufK2kCPJQKTWhwUaavEnaEFZynkDcjDtgbgLIoBbxf4u8T087mwptPR7TVZTqiJpSJHB0Urz0QruPkzw3wggPB3Cikl1IGQOljdGFv374muQseifuj25/WbwQsp/eqACjp23xr8p5NulZsfkn5tcJ+8PdgjI6a/ijywS6vxZF731xuHAoNGo/ehsGys= administrator@DESKTOP-EKVLNMD" > ~/.ssh/authorized_keys
+
+CMD bash
