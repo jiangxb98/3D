@@ -120,7 +120,7 @@ exps/
 mmdet3d/.mim
 
 # Pytorch
-# *.pth
+*.pth
 
 # demo
 *.jpg
