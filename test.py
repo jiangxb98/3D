@@ -1,7 +1,5 @@
-import numpy as np
-
-a = [1,2,3,4,5]
-a = np.array(a)
-
-for i in range(len(a)):
-    print(a[i])
+from glob import glob
+import os.path as osp
+load_dir = '/disk/deepdata/dataset/waymo_v1.4/training'
+ls = glob(osp.join(load_dir,'*.tfrecord'))
+print(ls)
