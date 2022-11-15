@@ -27,7 +27,7 @@ RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.c
 RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn mmdet3d==1.0.0rc3
 RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn spconv-cu111
 RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn open3d minio==7.1.11 pymongo==3.12.3
-RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn waymo-open-dataset-tf-2-1-0==1.2.0
+RUN pip install -i http://pip.cowarobot.cn/simple --trusted-host pip.cowarobot.cn waymo-open-dataset-tf-2-6-0==1.4.9
 
 ARG COWA3D_VER=unknown
 
