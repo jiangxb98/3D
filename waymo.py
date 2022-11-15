@@ -733,14 +733,14 @@ if __name__ == '__main__':
     splits = ['training', 'validation', 'testing']
 
     minio_cfg = dict(
-        endpoint='ossapi.cowarobot.cn:9000',
-        access_key='abcdef',
-        secret_key='12345678',
-        region='shjd-oss',
+        endpoint='',
+        access_key='',
+        secret_key='',
+        region='',
         secure=False)
 
     mongo_cfg = dict(
-        host="mongodb://root:root@172.16.110.100:27017/"
+        host=""
     )
 
     for i, split in enumerate(splits):
