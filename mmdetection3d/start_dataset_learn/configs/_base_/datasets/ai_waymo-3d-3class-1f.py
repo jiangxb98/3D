@@ -51,9 +51,9 @@ train_pipeline = [
         type='LoadPoints',
         coord_type='LIDAR',
         file_client_args=file_client_args),
-    # dict(
-    #     type='LoadImages',
-    #     file_client_args=file_client_args,),
+    dict(
+        type='LoadImages',
+        file_client_args=file_client_args,),
     dict(
         type='LoadAnnos3D',
         with_bbox_3d=True,
@@ -81,7 +81,8 @@ train_pipeline = [
     # dict(type='Collect3D', keys=['points', 'img', 'gt_bboxes_3d', 'gt_labels_3d'],
     # DataContainer
     dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d', \
-        'pts_semantic_mask', 'pts_instance_mask', 'gt_bboxes','gt_labels'],
+        'pts_semantic_mask', 'pts_instance_mask', 'gt_bboxes','gt_labels', \
+        'img','pan_semantic_mask','pan_mask_fields'],
     )
 ]
 

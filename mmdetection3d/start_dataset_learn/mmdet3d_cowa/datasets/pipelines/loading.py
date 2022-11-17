@@ -183,22 +183,27 @@ class LoadImages(object):
         return img        
 
     def __call__(self, results):
-        results['filename'] = filename
-        results['ori_filename'] = results['img_info']['filename']
-        results['img'] = img
-        results['img_shape'] = img.shape
-        results['ori_shape'] = img.shape
+        results['filename'] = []
+        results['img'] = []
+        results['img_shape'] = []
+        results['ori_shape'] = []
         results['img_fields'] = ['img']
-        results['cam2img'] = results['img_info']['cam_intrinsic']
+        results['lidar2img'] = []
         for i in range(len(results['img_info']['img_path_info'])):
             filename = results['img_info']['img_path_info'][i]['filename']
             img = self._load_img(results, filename)
             results['img'].append = img
             results['filename'].append = filename
             results['img_shape'].append = img.shape
-            results['img_fields'].append = ['img']
             results['lidar2img'].append = results['img_info'][i]['lidar2img']
         return results
+    
+    def __repr__(self):
+        repr_str = (f'{self.__class__.__name__}('
+                    f'to_float32={self.to_float32}, '
+                    f"color_type='{self.color_type}', "
+                    f'file_client_args={self.file_client_args})')
+        return repr_str       
 
 
 @PIPELINES.register_module()
