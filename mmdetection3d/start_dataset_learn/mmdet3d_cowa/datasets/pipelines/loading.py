@@ -165,7 +165,40 @@ class LoadAnnos3D(LoadAnnotations3D):
 
 @PIPELINES.register_module()
 class LoadImages(object):
-    pass
+    def __init__(self,
+                 to_float32=False,
+                 color_type='color',
+                 file_client_args=dict(backend='disk')):
+        self.to_float32 = to_float32
+        self.color_type = color_type
+        self.file_client_args = file_client_args.copy()
+        self.file_client = None
+
+    def _load_img(self, results, token):
+        if self.file_client is None:
+            self.file_client = mmcv.FileClient(**self.file_client_args)
+        pts_bytes = self.file_client.get(token)
+        img = results['img_info']['img_loader'](results, pts_bytes)
+        img = mmcv.imfrombytes(img, flag=self.color_type)
+        return img        
+
+    def __call__(self, results):
+        results['filename'] = filename
+        results['ori_filename'] = results['img_info']['filename']
+        results['img'] = img
+        results['img_shape'] = img.shape
+        results['ori_shape'] = img.shape
+        results['img_fields'] = ['img']
+        results['cam2img'] = results['img_info']['cam_intrinsic']
+        for i in range(len(results['img_info']['img_path_info'])):
+            filename = results['img_info']['img_path_info'][i]['filename']
+            img = self._load_img(results, filename)
+            results['img'].append = img
+            results['filename'].append = filename
+            results['img_shape'].append = img.shape
+            results['img_fields'].append = ['img']
+            results['lidar2img'].append = results['img_info'][i]['lidar2img']
+        return results
 
 
 @PIPELINES.register_module()

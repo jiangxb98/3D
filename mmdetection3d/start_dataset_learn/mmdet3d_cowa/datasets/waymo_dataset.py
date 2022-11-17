@@ -116,15 +116,10 @@ class WaymoDataset(Custom3DDataset):
         info['pts_info']['pts_loader'] = self.pts_loader  # 只是定义了函数，没有调用，用到才调用
         # get image info : image path, transform matrix
         img_path_info = []
-        img_info={}
         for img in info['images']:
             lidar2img = np.array(img['cam_intrinsic']) @ np.array(
                 img['tf_lidar_to_cam'])
             img_path_info.append(dict(filename=img['path'], lidar2img=lidar2img))
-        img_info['img_path_info'] = img_path_info
-        # image loader
-        if self.load_img:
-            img_info['img_loader'] = self.img_loader
 
         info['ego_pose'] = np.array(info['ego_pose'])
         for sweep in info['pts_info']['sweeps']:
@@ -133,7 +128,8 @@ class WaymoDataset(Custom3DDataset):
         input_dict = dict(
             sample_idx=sample_idx,
             pts_info=info['pts_info'],
-            img_info=img_info)
+            img_info=dict(img_loader=self.img_loader,
+                img_path_info=img_path_info),)
 
         # 这里放入了2D的label
         #import pdb;pdb.set_trace()
@@ -172,7 +168,7 @@ class WaymoDataset(Custom3DDataset):
         import tensorflow as tf
         # decode image
         img = np.load(BytesIO(pts_bytes))
-        img = tf.image.decode.jpeg(img)
+        # img = tf.image.decode.jpeg(img)
         return img
 
     @staticmethod
