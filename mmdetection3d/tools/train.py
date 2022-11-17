@@ -253,7 +253,7 @@ def main():
         model,
         datasets,
         cfg,
-        distributed=distributed,
+        distributed=distributed,  # is distribut train?
         validate=(not args.no_validate),
         timestamp=timestamp,
         meta=meta)

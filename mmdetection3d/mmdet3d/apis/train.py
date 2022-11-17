@@ -290,7 +290,7 @@ def train_detector(model,
             # Replace 'ImageToTensor' to 'DefaultFormatBundle'
             cfg.data.val.pipeline = replace_ImageToTensor(
                 cfg.data.val.pipeline)
-        val_dataset = build_dataset(cfg.data.val, dict(test_mode=True))
+        val_dataset = build_dataset(cfg.data.val, dict(test_mode=True))  # 验证集
         val_dataloader = build_mmdet_dataloader(
             val_dataset,
             samples_per_gpu=val_samples_per_gpu,

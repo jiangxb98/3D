@@ -38,7 +38,7 @@ class MVXTwoStageDetector(Base3DDetector):
                  pretrained=None,
                  init_cfg=None):
         super(MVXTwoStageDetector, self).__init__(init_cfg=init_cfg)
-
+        # 这个为什么不用builder实例化？
         if pts_voxel_layer:
             self.pts_voxel_layer = Voxelization(**pts_voxel_layer)
         if pts_voxel_encoder:

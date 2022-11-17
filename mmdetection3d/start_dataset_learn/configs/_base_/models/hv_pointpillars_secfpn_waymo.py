@@ -21,19 +21,19 @@ model = dict(
         with_cluster_center=True,
         with_voxel_center=True,
         point_cloud_range=[-74.88, -74.88, -2, 74.88, 74.88, 4],
-        norm_cfg=dict(type='SyncBN', eps=1e-3, momentum=0.01)),
+        norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01)),
     pts_middle_encoder=dict(
         type='PointPillarsScatter', in_channels=64, output_shape=[468, 468]),
     pts_backbone=dict(
         type='SECOND',
         in_channels=64,
-        norm_cfg=dict(type='SyncBN', eps=1e-3, momentum=0.01),
+        norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
         layer_nums=[3, 5, 5],
         layer_strides=[1, 2, 2],
         out_channels=[64, 128, 256]),
     pts_neck=dict(
         type='SECONDFPN',
-        norm_cfg=dict(type='SyncBN', eps=1e-3, momentum=0.01),
+        norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
         in_channels=[64, 128, 256],
         upsample_strides=[1, 2, 4],
         out_channels=[128, 128, 128]),

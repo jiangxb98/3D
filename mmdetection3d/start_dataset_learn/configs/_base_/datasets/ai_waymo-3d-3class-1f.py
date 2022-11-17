@@ -2,18 +2,30 @@ dataset_type = 'WaymoDataset'
 
 file_client_args = dict(
     backend='MINIO',
-    bucket='waymo',
-    endpoint='oss01-api.cowadns.com:30009',
+    bucket='ai-waymo-v1.4',
+    endpoint='ossapi.cowarobot.cn:9000',
     secure=False)
 
 datainfo_client_args = dict(
     backend='MONGODB',
-    database='waymo',
+    database='ai-waymo-v1_4',
     host='mongodb://root:root@172.16.110.100:27017/')
 
 class_names = ['Car', 'Pedestrian', 'Cyclist']
+semseg_names = ['Car', 'Truck', 'Bus', 'Motorcyclist', 'Bicyclist', 'Pedestrian', \
+    'Sign', 'Traffic' 'Light', 'Pole', 'Construction' 'Cone', 'Bicycle', \
+    'Motorcycle', 'Building', 'Vegetation', 'Tree' 'Trunk', 'Curb', \
+    'Road', 'Lane Marker', 'Walkable', 'Sidewalk', 'Other Ground', \
+    'Other Vehicle', 'Undefined']
+panseg_names = ['Car', 'Bus', 'Truck', 'Other Large Vehicle', 'Trailer',\
+    'Ego Vehicle', 'Motorcycle', 'Bicycle', 'Pedestrian', 'Cyclist', \
+    'Motorcyclist', 'Ground Animal', 'Bird', 'Pole', 'Sign', 'Traffic Light',\
+    'Construction Cone', 'Pedestrian Object', 'Building', 'Road', 'Sidewalk',\
+    'Road Marker', 'Lane Marker', 'Vegetation', 'Sky', 'Ground', 'Static', 'Dynamic']
+
 point_cloud_range = [-74.88, -74.88, -2, 74.88, 74.88, 4]
-input_modality = dict(use_lidar=True, use_camera=False)
+input_modality = dict(use_lidar=True, use_camera=True)
+
 db_sampler = dict(
     type='DataBaseSampler',
     info_path='training/dbinfos/',
@@ -39,20 +51,26 @@ train_pipeline = [
         type='LoadPoints',
         coord_type='LIDAR',
         file_client_args=file_client_args),
+    # dict(
+    #     type='LoadImages',
+    #     file_client_args=file_client_args,),
     dict(
         type='LoadAnnos3D',
         with_bbox_3d=True,
-        with_label_3d=True),
-    dict(type='ObjectSample', db_sampler=db_sampler),
+        with_label_3d=True,
+        with_mask_3d=True,
+        with_seg_3d=True,
+        file_client_args=file_client_args,
+        ),
     dict(
-        type='RandomFlip3D',
-        sync_2d=False,
-        flip_ratio_bev_horizontal=0.5,
-        flip_ratio_bev_vertical=0.5),
-    dict(
-        type='GlobalRotScaleTrans',
-        rot_range=[-0.78539816, 0.78539816],
-        scale_ratio_range=[0.95, 1.05]),
+        type='LoadAnnos',
+        with_bbox=True,
+        with_label=True,
+        with_mask=True,
+        with_seg=True,
+        file_client_args=file_client_args
+    ),
+    dict(type='RandomFlip3D', flip_ratio_bev_horizontal=0.5),
     dict(type='PointsRangeFilter',
          point_cloud_range=point_cloud_range),
     dict(type='ObjectRangeFilter',
@@ -60,8 +78,13 @@ train_pipeline = [
     dict(type='FilterBoxWithMinimumPointsCount', num_points=1),
     dict(type='PointShuffle'),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
-    dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d'])
+    # dict(type='Collect3D', keys=['points', 'img', 'gt_bboxes_3d', 'gt_labels_3d'],
+    # DataContainer
+    dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d', \
+        'pts_semantic_mask', 'pts_instance_mask', 'gt_bboxes','gt_labels'],
+    )
 ]
+
 test_pipeline = [
     dict(
         type='LoadPoints',
@@ -101,21 +124,29 @@ eval_pipeline = [
 ]
 
 data = dict(
-    samples_per_gpu=8,
+    samples_per_gpu=4,
     workers_per_gpu=0,
     train=dict(
         type=dataset_type,
         info_path='training/infos',
-        datainfo_client_args=datainfo_client_args,
-        pipeline=train_pipeline,
-        modality=input_modality,
         classes=class_names,
-        test_mode=False,
+        modality=input_modality,
         # we use box_type_3d='LiDAR' in kitti and nuscenes dataset
         # and box_type_3d='Depth' in sunrgbd and scannet dataset.
         box_type_3d='LiDAR',
+        test_mode=False,
         # load one frame every five frames
-        load_interval=1),
+        load_interval=1,
+        datainfo_client_args=datainfo_client_args,
+        # 3d segmentation
+        load_semseg=True,
+        semseg_classes=semseg_names,
+        semseg_info_path='training/infos',  # semantic and instance same path
+        # 2d segmentation
+        load_panseg=False,  
+        panseg_classes = panseg_names,
+        panseg_info_path='training/infos',  # semantic and instance same path
+        pipeline=train_pipeline),
     val=dict(
         type=dataset_type,
         info_path='validation/infos',
@@ -124,16 +155,32 @@ data = dict(
         modality=input_modality,
         classes=class_names,
         test_mode=True,
-        box_type_3d='LiDAR'),
+        box_type_3d='LiDAR',
+        # 3d segmentation
+        load_semseg=True,
+        semseg_classes=semseg_names,
+        semseg_info_path='validation/infos',
+        # 2d segmentation
+        load_panseg=False,  
+        panseg_classes = panseg_names,
+        panseg_info_path='validation/infos',),
     test=dict(
         type=dataset_type,
-        info_path='validation/infos',
+        info_path='test/infos',
         datainfo_client_args=datainfo_client_args,
         pipeline=test_pipeline,
         modality=input_modality,
         classes=class_names,
         test_mode=True,
-        box_type_3d='LiDAR'))
+        box_type_3d='LiDAR',
+        # 3d segmentation
+        load_semseg=True,
+        semseg_classes=semseg_names,
+        semseg_info_path='test/infos',
+        # 2d segmentation
+        load_panseg=False,  
+        panseg_classes = panseg_names,
+        panseg_info_path='test/infos',))        
 
 evaluation = dict(interval=24, pipeline=eval_pipeline)
 custom_imports = dict(
