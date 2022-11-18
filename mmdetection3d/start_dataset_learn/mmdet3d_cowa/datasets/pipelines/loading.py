@@ -236,7 +236,7 @@ class LoadAnnos(LoadAnnotations):
 
         if self.file_client is None:
             self.file_client = mmcv.FileClient(**self.file_client_args)
-            
+
         results['pan_seg_fields'] = []
         results['pan_semantic_mask'] = []
 
@@ -246,6 +246,7 @@ class LoadAnnos(LoadAnnotations):
             results['pan_semantic_mask'].append(pan_semantic_mask)
 
         results['pan_seg_fields'].append('pan_semantic_mask')
+        results['seg_fields'].append('pan_semantic_mask')
         return results
 
     def _load_masks(self, results):
@@ -264,4 +265,5 @@ class LoadAnnos(LoadAnnotations):
             results['pan_instance_mask'].append(pan_instance_mask)
 
         results['pan_mask_fields'].append('pan_instance_mask')
+        results['mask_fields'].append('pan_instance_mask')
         return results
