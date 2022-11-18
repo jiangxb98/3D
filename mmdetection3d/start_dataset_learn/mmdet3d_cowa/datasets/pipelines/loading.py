@@ -237,16 +237,14 @@ class LoadAnnos(LoadAnnotations):
         if self.file_client is None:
             self.file_client = mmcv.FileClient(**self.file_client_args)
 
-        results['pan_seg_fields'] = []
-        results['pan_semantic_mask'] = []
+        results['gt_semantic_seg'] = []
 
         for pan_seg in pan_semantic_mask_path:
             mask_bytes = self.file_client.get(pan_seg)
             pan_semantic_mask = pan_semantic_mask_loader(results, mask_bytes, 'panseg_cls')
-            results['pan_semantic_mask'].append(pan_semantic_mask)
+            results['gt_semantic_seg'].append(pan_semantic_mask)
 
-        results['pan_seg_fields'].append('pan_semantic_mask')
-        results['seg_fields'].append('pan_semantic_mask')
+        results['seg_fields'].append('gt_semantic_seg')
         return results
 
     def _load_masks(self, results):
@@ -256,14 +254,12 @@ class LoadAnnos(LoadAnnotations):
         if self.file_client is None:
             self.file_client = mmcv.FileClient(**self.file_client_args)
 
-        results['pan_mask_fields'] = []
-        results['pan_instance_mask'] = []
+        results['gt_masks'] = []
 
         for pan_seg in pan_instance_mask_path:   
             mask_bytes = self.file_client.get(pan_seg)
             pan_instance_mask = pan_instance_mask_loader(results, mask_bytes, 'panseg_instance_id')
-            results['pan_instance_mask'].append(pan_instance_mask)
+            results['gt_masks'].append(pan_instance_mask)
 
-        results['pan_mask_fields'].append('pan_instance_mask')
-        results['mask_fields'].append('pan_instance_mask')
+        results['mask_fields'].append('gt_masks')
         return results

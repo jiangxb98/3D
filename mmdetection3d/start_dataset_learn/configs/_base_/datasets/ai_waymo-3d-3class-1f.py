@@ -80,12 +80,17 @@ train_pipeline = [
     #      point_cloud_range=point_cloud_range),
     # dict(type='FilterBoxWithMinimumPointsCount', num_points=1),
     # dict(type='PointShuffle'),
-    # dict(type='DefaultFormatBundle3D', class_names=class_names),
+    
+    # To DataContainer
+    dict(type='DefaultFormatBundle3D', class_names=class_names),
     # dict(type='Collect3D', keys=['points', 'img', 'gt_bboxes_3d', 'gt_labels_3d'],
-    # DataContainer
-    dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d', \
-        'pts_semantic_mask', 'pts_instance_mask', 'gt_bboxes','gt_labels', \
-        'img','pan_semantic_mask','pan_mask_fields'],
+    dict(
+        type='Collect3D', 
+        keys=['points', 'gt_bboxes_3d', 'gt_labels_3d', 'pts_semantic_mask', 
+            'pts_instance_mask', 'gt_bboxes','gt_labels',  'img',\
+            'gt_masks','gt_semantic_seg'],
+        meta_keys=['box_mode_3d','filename','img_shape','lidar2img',
+            'sample_idx','img_info','anno_info','pts_info','']
     )
 ]
 
