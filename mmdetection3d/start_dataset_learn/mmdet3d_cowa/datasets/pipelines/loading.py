@@ -168,11 +168,14 @@ class LoadImages(object):
     def __init__(self,
                  to_float32=False,
                  color_type='color',
-                 file_client_args=dict(backend='disk')):
+                 file_client_args=dict(backend='disk'),
+                 pad_shape=None,
+                 ):
         self.to_float32 = to_float32
         self.color_type = color_type
         self.file_client_args = file_client_args.copy()
         self.file_client = None
+        self.pad_shape = pad_shape
 
     def _load_img(self, results, token):
         if self.file_client is None:
@@ -190,6 +193,7 @@ class LoadImages(object):
         results['ori_shape'] = []
         results['img_fields'] = ['img']
         results['lidar2img'] = []
+        results['pad_shape'] = self.pad_shape
         for i in range(len(results['img_info']['img_path_info'])):
             filename = results['img_info']['img_path_info'][i]['filename']
             img = self._load_img(results, filename)
@@ -214,7 +218,7 @@ class LoadAnnos(LoadAnnotations):
     
     def _load_bboxes(self, results):
         ann_info = results['ann_info']
-        results['gt_bboxes'] = ann_info['gt_bboxes'].copy()  # some imgaes only 0 camera has 2d gt bbox
+        results['gt_bboxes'] = ann_info['gt_bboxes'].copy()  # some imgaes only front camera has 2d gt bbox
 
         if self.denorm_bbox:
             bbox_num = results['gt_bboxes'].shape[0]

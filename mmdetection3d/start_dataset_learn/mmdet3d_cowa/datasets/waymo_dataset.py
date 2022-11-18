@@ -162,7 +162,15 @@ class WaymoDataset(Custom3DDataset):
                          points['z'].astype('f4'),
                          #np.tanh(points['intensity'].astype('f4')),
                          points['intensity'].astype('f4'),
-                         points['elongation'].astype('f4')], axis=-1)
+                         points['elongation'].astype('f4'),
+                         points['lidar_idx'].astype('i2'),
+                         points['cam_idx_0'].astype('i2'),
+                         points['cam_idx_1'].astype('i2'),
+                         points['cam_column_0'].astype('i2'),
+                         points['cam_column_1'].astype('i2'),
+                         points['cam_row_0'].astype('i2'),
+                         points['cam_row_1'].astype('i2'),
+                         ], axis=-1)
     @staticmethod
     def img_loader(results, pts_bytes):
         return None

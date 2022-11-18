@@ -53,7 +53,8 @@ train_pipeline = [
         file_client_args=file_client_args),
     dict(
         type='LoadImages',
-        file_client_args=file_client_args,),
+        file_client_args=file_client_args,
+        pad_shape=(1280, 1920)),
     dict(
         type='LoadAnnos3D',
         with_bbox_3d=True,
@@ -81,16 +82,21 @@ train_pipeline = [
     # dict(type='FilterBoxWithMinimumPointsCount', num_points=1),
     # dict(type='PointShuffle'),
     
+    dict(
+        type='ResizeMultiViewImage',
+        img_scale=[(1280, 1920),(1280, 1920),(1280, 1920),(1280, 1920),(1280, 1920)],
+        multiscale_mode='range',
+        keep_ratio=False),
+
     # To DataContainer
     dict(type='DefaultFormatBundle3D', class_names=class_names),
-    # dict(type='Collect3D', keys=['points', 'img', 'gt_bboxes_3d', 'gt_labels_3d'],
     dict(
         type='Collect3D', 
         keys=['points', 'gt_bboxes_3d', 'gt_labels_3d', 'pts_semantic_mask', 
-            'pts_instance_mask', 'gt_bboxes','gt_labels',  'img',\
+            'pts_instance_mask', 'gt_bboxes','gt_labels', 'img' \
             'gt_masks','gt_semantic_seg'],
         meta_keys=['box_mode_3d','filename','img_shape','lidar2img',
-            'sample_idx','img_info','anno_info','pts_info','']
+            'sample_idx','img_info','anno_info','pts_info',]
     )
 ]
 
