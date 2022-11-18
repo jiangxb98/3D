@@ -215,6 +215,8 @@ class WaymoPrep(object):
     def save_image(self, client, frame, sample_idx, frame_info):
         # 5个空字典,存放五张图片的信息[{'path': 'training/image/0000000/0'}, {'path': 'training/image/0000000/1'}, {}, {}, {}]
         frame_info['images'] = [dict() for _ in range(5)]
+        # this has a bug, mongodb will appear none dict frame_info['panseg_info']=[{},{},{},{},{}]
+        # if self.load_semseg and frame.images[0].camera_segmentation_label.panoptic_label:
         frame_info['panseg_info'] = [dict() for _ in range(5)]
         for img in frame.images:
             img_path = f'{self.image_prefix}/{sample_idx:07d}/{str(img.name - 1)}'
@@ -372,7 +374,7 @@ class WaymoPrep(object):
         point_cloud['cam_row_1'] = cp_points[:, 5]
 
         pc_path = f'{self.lidar_prefix}/{sample_idx:07d}'
-        # vehicle在global下的位姿，Pvehicle = ego_pose x Plidar
+        # vehicle在global下的位姿，Pglobal = ego_pose x Pvehicle
         ego_pose = np.array(frame.pose.transform).reshape(4, 4)
         frame_info['ego_pose'] = ego_pose
         # 没看懂这里的sweeps是做什么的？记录他的上一帧

@@ -70,14 +70,17 @@ train_pipeline = [
         with_seg=True,
         file_client_args=file_client_args
     ),
-    dict(type='RandomFlip3D', flip_ratio_bev_horizontal=0.5),
-    dict(type='PointsRangeFilter',
-         point_cloud_range=point_cloud_range),
-    dict(type='ObjectRangeFilter',
-         point_cloud_range=point_cloud_range),
-    dict(type='FilterBoxWithMinimumPointsCount', num_points=1),
-    dict(type='PointShuffle'),
-    dict(type='DefaultFormatBundle3D', class_names=class_names),
+    # dict(
+    #     type='RandomFlip3D', 
+    #     sync_2d=False,
+    #     flip_ratio_bev_horizontal=0.5),
+    # dict(type='PointsRangeFilter',
+    #      point_cloud_range=point_cloud_range),
+    # dict(type='ObjectRangeFilter',
+    #      point_cloud_range=point_cloud_range),
+    # dict(type='FilterBoxWithMinimumPointsCount', num_points=1),
+    # dict(type='PointShuffle'),
+    # dict(type='DefaultFormatBundle3D', class_names=class_names),
     # dict(type='Collect3D', keys=['points', 'img', 'gt_bboxes_3d', 'gt_labels_3d'],
     # DataContainer
     dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d', \
@@ -144,7 +147,7 @@ data = dict(
         semseg_classes=semseg_names,
         semseg_info_path='training/infos',  # semantic and instance same path
         # 2d segmentation
-        load_panseg=False,  
+        load_panseg=True,  
         panseg_classes = panseg_names,
         panseg_info_path='training/infos',  # semantic and instance same path
         pipeline=train_pipeline),
@@ -158,7 +161,7 @@ data = dict(
         test_mode=True,
         box_type_3d='LiDAR',
         # 3d segmentation
-        load_semseg=True,
+        load_semseg=False,
         semseg_classes=semseg_names,
         semseg_info_path='validation/infos',
         # 2d segmentation

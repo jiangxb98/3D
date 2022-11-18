@@ -71,7 +71,7 @@ class WaymoDataset(Custom3DDataset):
         # train len(self.panseg_frame_infos)=12296
         if self.load_panseg:
             self.panseg_frame_infos = self.read_semseg_infos(self.panseg_info_path, filter_sem='panseg_info')
-        self.data_infos = self.semseg_frame_infos  # 测试点
+        # self.data_infos = self.semseg_frame_infos  # *********测试点***********
         # process pipeline
         if pipeline is not None:
             self.pipeline = Compose(pipeline)
@@ -165,11 +165,7 @@ class WaymoDataset(Custom3DDataset):
                          points['elongation'].astype('f4')], axis=-1)
     @staticmethod
     def img_loader(results, pts_bytes):
-        import tensorflow as tf
-        # decode image
-        img = np.load(BytesIO(pts_bytes))
-        # img = tf.image.decode.jpeg(img)
-        return img
+        return None
 
     @staticmethod
     def semseg_loader(results, pts_bytes, semseg_name):

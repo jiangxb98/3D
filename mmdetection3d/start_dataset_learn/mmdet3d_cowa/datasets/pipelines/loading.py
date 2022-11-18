@@ -178,8 +178,9 @@ class LoadImages(object):
         if self.file_client is None:
             self.file_client = mmcv.FileClient(**self.file_client_args)
         pts_bytes = self.file_client.get(token)
-        img = results['img_info']['img_loader'](results, pts_bytes)
-        img = mmcv.imfrombytes(img, flag=self.color_type)
+        # not need loader, use mmcv.imfrombytes
+        # img = results['img_info']['img_loader'](results, pts_bytes)
+        img = mmcv.imfrombytes(pts_bytes, flag=self.color_type)
         return img        
 
     def __call__(self, results):
@@ -192,10 +193,10 @@ class LoadImages(object):
         for i in range(len(results['img_info']['img_path_info'])):
             filename = results['img_info']['img_path_info'][i]['filename']
             img = self._load_img(results, filename)
-            results['img'].append = img
-            results['filename'].append = filename
-            results['img_shape'].append = img.shape
-            results['lidar2img'].append = results['img_info'][i]['lidar2img']
+            results['img'].append(img)
+            results['filename'].append(filename)
+            results['img_shape'].append(img.shape)
+            results['lidar2img'].append(results['img_info']['img_path_info'][i]['lidar2img'])
         return results
     
     def __repr__(self):
