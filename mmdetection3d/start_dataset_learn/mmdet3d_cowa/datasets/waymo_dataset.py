@@ -146,7 +146,7 @@ class WaymoDataset(Custom3DDataset):
                 panseg_path_info = []
                 # each frame have 5 panseg path
                 for panseg in info['panseg_info']:
-                    panseg_path_info.append(dict(path=panseg['path']))
+                    panseg_path_info.append(panseg['path'])
                 input_dict['ann_info']['pan_semantic_mask_loader'] = self.panseg_loader
                 input_dict['ann_info']['pan_semantic_mask_path'] = panseg_path_info
                 input_dict['ann_info']['pan_instance_mask_loader'] = self.panseg_loader
