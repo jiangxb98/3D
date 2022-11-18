@@ -214,7 +214,7 @@ class LoadAnnos(LoadAnnotations):
     
     def _load_bboxes(self, results):
         ann_info = results['ann_info']
-        results['gt_bboxes'] = ann_info['gt_bboxes'].copy()
+        results['gt_bboxes'] = ann_info['gt_bboxes'].copy()  # some imgaes only 0 camera has 2d gt bbox
 
         if self.denorm_bbox:
             bbox_num = results['gt_bboxes'].shape[0]
@@ -236,13 +236,14 @@ class LoadAnnos(LoadAnnotations):
 
         if self.file_client is None:
             self.file_client = mmcv.FileClient(**self.file_client_args)
-
+            
+        results['pan_seg_fields'] = []
         results['pan_semantic_mask'] = []
 
         for pan_seg in pan_semantic_mask_path:
-            mask_bytes = self.file_client.get(pan_seg['path'])
+            mask_bytes = self.file_client.get(pan_seg)
             pan_semantic_mask = pan_semantic_mask_loader(results, mask_bytes, 'panseg_cls')
-            results['pan_semantic_mask'].append = pan_semantic_mask
+            results['pan_semantic_mask'].append(pan_semantic_mask)
 
         results['pan_seg_fields'].append('pan_semantic_mask')
         return results
@@ -253,9 +254,14 @@ class LoadAnnos(LoadAnnotations):
 
         if self.file_client is None:
             self.file_client = mmcv.FileClient(**self.file_client_args)
+
+        results['pan_mask_fields'] = []
+        results['pan_instance_mask'] = []
+
         for pan_seg in pan_instance_mask_path:   
-            mask_bytes = self.file_client.get(pan_seg['path'])
+            mask_bytes = self.file_client.get(pan_seg)
             pan_instance_mask = pan_instance_mask_loader(results, mask_bytes, 'panseg_instance_id')
-            results['pan_instance_mask'] = pan_instance_mask
+            results['pan_instance_mask'].append(pan_instance_mask)
+
         results['pan_mask_fields'].append('pan_instance_mask')
         return results
