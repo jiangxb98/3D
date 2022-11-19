@@ -47,22 +47,22 @@ db_sampler = dict(
             file_client_args=file_client_args)])
 
 train_pipeline = [
-    dict(
-        type='LoadPoints',
-        coord_type='LIDAR',
-        file_client_args=file_client_args),
+    # dict(
+    #     type='LoadPoints',
+    #     coord_type='LIDAR',
+    #     file_client_args=file_client_args),
     dict(
         type='LoadImages',
         file_client_args=file_client_args,
         pad_shape=(1280, 1920)),
-    dict(
-        type='LoadAnnos3D',
-        with_bbox_3d=True,
-        with_label_3d=True,
-        with_mask_3d=True,
-        with_seg_3d=True,
-        file_client_args=file_client_args,
-        ),
+    # dict(
+    #     type='LoadAnnos3D',
+    #     with_bbox_3d=True,
+    #     with_label_3d=True,
+    #     with_mask_3d=True,
+    #     with_seg_3d=True,
+    #     file_client_args=file_client_args,
+    #     ),
     dict(
         type='LoadAnnos',
         with_bbox=True,
@@ -84,7 +84,7 @@ train_pipeline = [
     
     dict(
         type='ResizeMultiViewImage',
-        img_scale=[(1280, 1920),(1280, 1920),(1280, 1920),(1280, 1920),(1280, 1920)],
+        img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
         multiscale_mode='range',
         keep_ratio=False),
 
@@ -127,10 +127,10 @@ test_pipeline = [
         ])
 ]
 eval_pipeline = [
-    dict(
-        type='LoadPoints',
-        coord_type='LIDAR',
-        file_client_args=file_client_args),
+    # dict(
+    #     type='LoadPoints',
+    #     coord_type='LIDAR',
+    #     file_client_args=file_client_args),
     dict(
         type='DefaultFormatBundle3D',
         class_names=class_names,

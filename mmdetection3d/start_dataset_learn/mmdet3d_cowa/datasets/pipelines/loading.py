@@ -184,6 +184,7 @@ class LoadImages(object):
         # not need loader, use mmcv.imfrombytes
         # img = results['img_info']['img_loader'](results, pts_bytes)
         img = mmcv.imfrombytes(pts_bytes, flag=self.color_type)
+        # or tf.image.decode_jpeg(pts_bytes) both two fun have same size (1280,1920,3)
         return img        
 
     def __call__(self, results):
@@ -196,7 +197,7 @@ class LoadImages(object):
         results['pad_shape'] = self.pad_shape
         for i in range(len(results['img_info']['img_path_info'])):
             filename = results['img_info']['img_path_info'][i]['filename']
-            img = self._load_img(results, filename)
+            img = self._load_img(results, filename).transpose((1,0,2))
             results['img'].append(img)
             results['filename'].append(filename)
             results['img_shape'].append(img.shape)

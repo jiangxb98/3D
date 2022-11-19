@@ -94,9 +94,9 @@ class FilterBoxWithMinimumPointsCount:
             torch.from_numpy(mask)]
         input_dict['gt_labels_3d'] = input_dict['gt_labels_3d'][mask]
         return input_dict
-
+# have bug, how to deal with None label img[i]
 @PIPELINES.register_module()
-class PadMultiImage:
+class PadMultiViewImage:
     """Pad the image & masks & segmentation map.
 
     Args:
@@ -224,7 +224,6 @@ class ResizeMultiViewImage:
         # TODO: refactor the override option in Resize
         self.interpolation = interpolation
         self.bbox_clip_border = bbox_clip_border
-
     def _resize_img(self, results):
         """Resize images with ``results['scale']``."""
         for key in results.get('img_fields', ['img']):
@@ -234,20 +233,20 @@ class ResizeMultiViewImage:
                 if self.keep_ratio:
                     img, scale_factor = mmcv.imrescale(
                         results['img'][i],
-                        results['scale'],
+                        results['scale'][i],
                         return_scale=True,
                         interpolation=self.interpolation,
                         backend=self.backend)
                     # the w_scale and h_scale has minor difference
                     # a real fix should be done in the mmcv.imrescale in the future
                     new_h, new_w = img.shape[:2]
-                    h, w = results[key].shape[:2]
+                    h, w = results[key][i].shape[:2]
                     w_scale = new_w / w
                     h_scale = new_h / h
                 else:
                     img, w_scale, h_scale = mmcv.imresize(
                         results['img'][i],
-                        results['scale'],
+                        results['scale'][i],
                         return_scale=True,
                         interpolation=self.interpolation,
                         backend=self.backend)
@@ -269,12 +268,15 @@ class ResizeMultiViewImage:
         for key in results.get('bbox_fields', []):
             multi_gt_bboxes = []
             for i in range(len(results['img'])):
-                bboxes = results[key][i] * results['scale_factor'][i]
-                if self.bbox_clip_border:
-                    img_shape = results['img_shape'][i]
-                    bboxes[:, 0::2] = np.clip(bboxes[:, 0::2], 0, img_shape[1])
-                    bboxes[:, 1::2] = np.clip(bboxes[:, 1::2], 0, img_shape[0])
-                multi_gt_bboxes.append(bboxes)
+                if results[key][i].shape[0] != 0:
+                    bboxes = results[key][i] * results['scale_factor'][i]
+                    if self.bbox_clip_border:
+                        img_shape = results['img_shape'][i]
+                        bboxes[:, 0::2] = np.clip(bboxes[:, 0::2], 0, img_shape[1])
+                        bboxes[:, 1::2] = np.clip(bboxes[:, 1::2], 0, img_shape[0])
+                    multi_gt_bboxes.append(bboxes)
+                else:
+                    multi_gt_bboxes.append(np.array([]))
             results[key] = np.array(multi_gt_bboxes)
 
     def _resize_masks(self, results):
@@ -282,12 +284,16 @@ class ResizeMultiViewImage:
         for key in results.get('mask_fields', []):
             multi_gt_masks = []
             for i in range(len(results['img'])):
-                if results[key] is None:
-                    continue
-                if self.keep_ratio:
-                    results[key][i] = results[key][i].rescale(results['scale'][i])  # to contrast
+                if results[key][i].shape[0] != 0:
+                    if results[key] is None:
+                        continue
+                    if self.keep_ratio:
+                        results[key][i] = results[key][i].rescale(results['scale'][i])  # to contrast
+                    else:
+                        new_shape=results['img_shape'][i][:2]
+                        multi_gt_masks.append(results[key][i].resize(new_shape))
                 else:
-                     multi_gt_masks.append(results[key][i].resize(results['img_shape'][i][:2]))
+                    multi_gt_masks.append(np.array([]))
             results[key] = np.array(multi_gt_masks)
 
     def _resize_seg(self, results):
@@ -295,19 +301,22 @@ class ResizeMultiViewImage:
         for key in results.get('seg_fields', []):
             multi_seg = []
             for i in range(len(results['img'])):
-                if self.keep_ratio:
-                    gt_seg = mmcv.imrescale(
-                        results[key][i],
-                        results['scale'][i],
-                        interpolation='nearest',
-                        backend=self.backend)
+                if results[key][i].shape[0] != 0:
+                    if self.keep_ratio:
+                        gt_seg = mmcv.imrescale(
+                            results[key][i],
+                            results['scale'][i],
+                            interpolation='nearest',
+                            backend=self.backend)
+                    else:
+                        gt_seg = mmcv.imresize(
+                            results[key][i],
+                            results['scale'][i],
+                            interpolation='nearest',
+                            backend=self.backend)
+                    multi_seg.append(gt_seg)
                 else:
-                    gt_seg = mmcv.imresize(
-                        results[key][i],
-                        results['scale'][i],
-                        interpolation='nearest',
-                        backend=self.backend)
-                multi_seg.append(gt_seg)
+                    multi_seg.append(np.array([]))
             results[key] = np.array(multi_seg)
 
     def __call__(self, results):
@@ -321,6 +330,7 @@ class ResizeMultiViewImage:
             dict: Resized results, 'img_shape', 'pad_shape', 'scale_factor', \
                 'keep_ratio' keys are added into result dict.
         """
+        results['scale'] = self.img_scale
         self._resize_img(results)
         self._resize_bboxes(results)
         self._resize_masks(results)
