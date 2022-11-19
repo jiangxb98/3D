@@ -95,7 +95,7 @@ class FilterBoxWithMinimumPointsCount:
         input_dict['gt_labels_3d'] = input_dict['gt_labels_3d'][mask]
         return input_dict
 
-# have bug, how to deal with None label img[i]
+# No Test
 @PIPELINES.register_module()
 class PadMultiViewImage:
     """Pad the image & masks & segmentation map.
@@ -167,7 +167,7 @@ class PadMultiViewImage:
                     multi_pad_masks.append(results[key][i].pad(pad_shape, pad_val=pad_val))
                 else:
                     multi_pad_masks.append(np.array([]))
-            results[key] = np.array(multi_pad_masks)
+            results[key] = multi_pad_masks
 
     def _pad_seg(self, results):
         """Pad semantic segmentation map according to
@@ -180,7 +180,7 @@ class PadMultiViewImage:
                     multi_pad_seg.append(mmcv.impad(results[key][i], shape=results['pad_shape'][i][:2], pad_val=pad_val))
                 else:
                     multi_pad_seg.append(np.array([]))
-            results[key]=np.array(multi_pad_seg)
+            results[key] = multi_pad_seg
 
     def __call__(self, results):
         """Call function to pad images, masks, semantic segmentation maps.
@@ -265,7 +265,7 @@ class ResizeMultiViewImage:
                         dtype=np.float32))
                 
             results[key] = np.array(multi_view_img)
-            scale_factor = np.array(multi_scale_factor)
+            scale_factor = multi_scale_factor
 
             results['img_shape'] = [img.shape for img in multi_view_img]
             # in case that there is no padding
@@ -308,7 +308,7 @@ class ResizeMultiViewImage:
                         multi_gt_masks.append(results[key][i].resize(new_shape))
                 else:
                     multi_gt_masks.append(np.array([]))
-            results[key] = np.array(multi_gt_masks)
+            results[key] = multi_gt_masks
 
     def _resize_seg(self, results):
         """Resize semantic segmentation map with ``results['scale']``."""
@@ -331,7 +331,7 @@ class ResizeMultiViewImage:
                     multi_seg.append(gt_seg)
                 else:
                     multi_seg.append(np.array([]))
-            results[key] = np.array(multi_seg)
+            results[key] = multi_seg
 
     def __call__(self, results):
         """Call function to resize images, bounding boxes, masks, semantic
@@ -356,5 +356,120 @@ class ResizeMultiViewImage:
         repr_str += f'(img_scale={self.img_scale}, '
         repr_str += f'multiscale_mode={self.multiscale_mode}, '
         repr_str += f'keep_ratio={self.keep_ratio}, '
+        repr_str += f'bbox_clip_border={self.bbox_clip_border})'
+        return repr_str
+
+# No Test
+@PIPELINES.register_module()
+class MultiViewCrop:
+    def __init__(self,
+                crop_size=(886, 1920),
+                crop_type='absolute',
+                bbox_clip_border=True):
+        self.crop_size = crop_size
+        self.bbox_clip_border = bbox_clip_border
+        self.crop_type = crop_type
+        # The key correspondence from bboxes to labels and masks.
+        self.bbox2label = {
+            'gt_bboxes': 'gt_labels',
+        }
+        self.bbox2mask = {
+            'gt_bboxes': 'gt_masks',
+        }
+    
+    def _crop_data(self, results, crop_size):
+        assert crop_size[0] > 0 and crop_size[1] > 0
+        for key in results.get('img_fields', ['img']):
+            imgs = results[key] # mutli images = 5
+            img_crop = []
+            offset_wh = []
+            bbox_crop = []
+            # mask_crop = []
+            sem_crop = []
+            for i in range(len(results['img'])):
+
+                offset_h = max(imgs[i].shape[0] - crop_size[0], 0)  # 480
+                offset_w = max(imgs[i].shape[1] - crop_size[1], 0)  # 0
+                offset_wh.append(np.array([offset_w, offset_h, offset_w, offset_h],
+                                   dtype=np.float32))
+                # if no offset
+                if offset_h == 0 and offset_w == 0:
+                    img_crop.append(img)
+                    continue
+                crop_y1, crop_y2 = offset_h, offset_h + crop_size[0]
+                crop_x1, crop_x2 = offset_w, offset_w + crop_size[1]
+
+                # crop the image
+                img = imgs[i][crop_y1:crop_y2, crop_x1:crop_x2, ...]
+                img_crop.append(img)
+            results[key] = np.array(img_crop)
+        results['img_shape'] = [crop_size for i in range(len(results['img']))]
+
+        # crop bboxes accordingly and clip to the image boundary
+        for key in results.get('bbox_fields', []):
+            
+            offset_h = offset_wh[i][1]
+            offset_w = offset_wh[i][0]
+            crop_y1, crop_y2 = offset_h, offset_h + crop_size[0]
+            crop_x1, crop_x2 = offset_w, offset_w + crop_size[1]
+
+            # e.g. gt_bboxes
+            for i in range(len(results['img'])):
+                img_shape = results['img_shape'][i]
+                # if gt_bboxes is None, skip this image, continue
+                if (results[key][i].shape[0] == 0 and key == 'gt_bboxes'):
+                    bbox_crop.append(np.array([]))
+                    continue
+                bboxes = results[key][i] - offset_wh[i]
+                # if no offset continue
+                if offset_wh[i][0] == 0 and offset_wh[i][1] == 0:
+                    bbox_crop.append(bboxes)
+                    continue
+                if self.bbox_clip_border:
+                    bboxes[:, 0::2] = np.clip(bboxes[:, 0::2], 0, img_shape[1])
+                    bboxes[:, 1::2] = np.clip(bboxes[:, 1::2], 0, img_shape[0])
+                # If the crop does not contain any gt-bbox area, skip continue
+                valid_inds = (bboxes[:, 2] > bboxes[:, 0]) & (bboxes[:, 3] > bboxes[:, 1])
+                if key == 'gt_bboxes' and not valid_inds.any():
+                    bbox_crop.append(np.array([]))
+                    continue
+
+                # label fields. e.g. gt_labels and gt_labels_ignore
+                label_key = self.bbox2label.get(key)
+                if label_key in results:
+                    results[label_key][i] = results[label_key][i][valid_inds]
+
+                # mask fields, e.g. gt_masks and gt_masks_ignore
+                mask_key = self.bbox2mask.get(key)
+                if mask_key in results:
+                    results[mask_key][i] = results[mask_key][i][
+                        valid_inds.nonzero()[0]].crop(
+                            np.asarray([crop_x1, crop_y1, crop_x2, crop_y2]))
+            
+            results[key] = bbox_crop
+
+        # crop semantic seg
+        for key in results.get('seg_fields', []):
+            for i in range(len(results['img'])):
+                offset_h = offset_wh[i][1]
+                offset_w = offset_wh[i][0]
+                crop_y1, crop_y2 = offset_h, offset_h + crop_size[0]
+                crop_x1, crop_x2 = offset_w, offset_w + crop_size[1]
+                if offset_h == 0 and offset_w == 0:
+                    sem_crop.append(results[key][i])
+                    continue
+                sem_crop.append(results[key][i][crop_y1:crop_y2, crop_x1:crop_x2])
+            results[key] = sem_crop
+
+        return results
+
+    def __call__(self, results):
+        results = self._crop_data(results, self.crop_size)
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(crop_size={self.crop_size}, '
+        repr_str += f'crop_type={self.crop_type}, '
         repr_str += f'bbox_clip_border={self.bbox_clip_border})'
         return repr_str

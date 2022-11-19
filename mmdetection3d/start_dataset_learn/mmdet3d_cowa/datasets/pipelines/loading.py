@@ -201,6 +201,7 @@ class LoadImages(object):
             results['img'].append(img)
             results['filename'].append(filename)
             results['img_shape'].append(img.shape)
+            results['ori_shape'].append(img.shape)
             results['lidar2img'].append(results['img_info']['img_path_info'][i]['lidar2img'])
         return results
     
