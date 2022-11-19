@@ -174,7 +174,7 @@ class WaymoPrep(object):
         gtdb_tracking = []
         gtdb_infos = dict()
         data_client = Minio(**self.minio_cfg)
-        # data_client = None  # 防止上传
+        # data_client = None  # 防止上传，一定注意workers=0,设置好！ mongodb也得注释掉，不然会清空
         # 迭代遍历dataset，获取每帧的信息
         for frame_idx, data in enumerate(dataset):
             sample_idx = self.sample_index(file_idx, frame_idx)
@@ -215,9 +215,9 @@ class WaymoPrep(object):
     def save_image(self, client, frame, sample_idx, frame_info):
         # 5个空字典,存放五张图片的信息[{'path': 'training/image/0000000/0'}, {'path': 'training/image/0000000/1'}, {}, {}, {}]
         frame_info['images'] = [dict() for _ in range(5)]
-        # this has a bug, mongodb will appear none dict frame_info['panseg_info']=[{},{},{},{},{}]
-        # if self.load_semseg and frame.images[0].camera_segmentation_label.panoptic_label:
-        frame_info['panseg_info'] = [dict() for _ in range(5)]
+  
+        if self.load_semseg and frame.images[0].camera_segmentation_label.panoptic_label:
+            frame_info['panseg_info'] = [dict() for _ in range(5)]  
         for img in frame.images:
             img_path = f'{self.image_prefix}/{sample_idx:07d}/{str(img.name - 1)}'
             panseg_path = f'{self.panseg_prefix}/{sample_idx:07d}/{str(img.name - 1)}'
@@ -461,7 +461,7 @@ class WaymoPrep(object):
         annos['track_difficulty'] = []
         # 获得camera的labels
         for labels in frame.camera_labels:  # for 循环五个相机
-            for obj in labels.labels:  # for 循环每个相机的对象
+            for obj in labels.labels:  # for 循环每个相机内的对象
                 # 获取对象类别，obj.type是int类型，{0:"DontCare",1:"Car",2,3,4}
                 my_type = self.type_list[obj.type]
                 bbox = [
@@ -730,7 +730,7 @@ class WaymoPrep(object):
         return np.divmod(panoptic_label, panoptic_label_divisor)
 
 if __name__ == '__main__':
-    in_dir = '/deepdata/dataset/waymo_v1.4/'
+    in_dir = '/disk/deepdata/dataset/waymo_v1.4/'
     bucket = 'ai-waymo-v1.4'
     database = 'ai-waymo-v1_4'
     workers = 32  # 如何是0就是单进程

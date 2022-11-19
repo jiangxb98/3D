@@ -6,7 +6,7 @@ from mmdet.datasets.pipelines import LoadAnnotations
 from io import BytesIO
 from mmdet3d.datasets.builder import PIPELINES
 import torch
-
+from mmdet.core import BitmapMasks, PolygonMasks
 
 @PIPELINES.register_module()
 class LoadPoints(object):
@@ -44,7 +44,7 @@ class LoadPoints(object):
         if self.remove_close:
             points = self._remove_close(points)
         points_class = get_points_type(self.coord_type)
-        points = points_class(points, points_dim=points.shape[-1])
+        points = points_class(points, points_dim=points.shape[-1])  # 实例化，LiDARPoints
         results['points'] = points
         return results
 
@@ -264,7 +264,14 @@ class LoadAnnos(LoadAnnotations):
         for pan_seg in pan_instance_mask_path:   
             mask_bytes = self.file_client.get(pan_seg)
             pan_instance_mask = pan_instance_mask_loader(results, mask_bytes, 'panseg_instance_id')
-            results['gt_masks'].append(pan_instance_mask)
+            # 需要确认mask的shape是HxW还是WxH
+            h, w = pan_instance_mask.shape[0], pan_instance_mask.shape[1]
+            if self.poly2mask:
+                gt_masks = BitmapMasks(self._poly2mask(pan_instance_mask, h, w), h, w)
+            else:
+                gt_masks = PolygonMasks(self.process_polygons(pan_instance_mask))
+
+            results['gt_masks'].append(gt_masks)
 
         results['mask_fields'].append('gt_masks')
         return results

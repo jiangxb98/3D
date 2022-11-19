@@ -26,35 +26,35 @@ panseg_names = ['Car', 'Bus', 'Truck', 'Other Large Vehicle', 'Trailer',\
 point_cloud_range = [-74.88, -74.88, -2, 74.88, 74.88, 4]
 input_modality = dict(use_lidar=True, use_camera=True)
 
-db_sampler = dict(
-    type='DataBaseSampler',
-    info_path='training/dbinfos/',
-    rate=1.0,
-    filter=dict(
-        Car=dict(difficulty={'$nin': [-1]},
-                 num_points_in_gt={'$gte': 5}),
-        Pedestrian=dict(difficulty={'$nin': [-1]},
-                        num_points_in_gt={'$gte': 10}),
-        Cyclist=dict(difficulty={'$nin': [-1]},
-                     num_points_in_gt={'$gte': 10})),
-    classes=class_names,
-    sample_groups=dict(Car=15, Pedestrian=10, Cyclist=10),
-    datainfo_client_args=datainfo_client_args,
-    points_loader=[
-        dict(
-            type='LoadPoints',
-            coord_type='LIDAR',
-            file_client_args=file_client_args)])
+# db_sampler = dict(
+#     type='DataBaseSampler',
+#     info_path='training/dbinfos/',
+#     rate=1.0,
+#     filter=dict(
+#         Car=dict(difficulty={'$nin': [-1]},
+#                  num_points_in_gt={'$gte': 5}),
+#         Pedestrian=dict(difficulty={'$nin': [-1]},
+#                         num_points_in_gt={'$gte': 10}),
+#         Cyclist=dict(difficulty={'$nin': [-1]},
+#                      num_points_in_gt={'$gte': 10})),
+#     classes=class_names,
+#     sample_groups=dict(Car=15, Pedestrian=10, Cyclist=10),
+#     datainfo_client_args=datainfo_client_args,
+#     points_loader=[
+#         dict(
+#             type='LoadPoints',
+#             coord_type='LIDAR',
+#             file_client_args=file_client_args)])
 
 train_pipeline = [
-    # dict(
-    #     type='LoadPoints',
-    #     coord_type='LIDAR',
-    #     file_client_args=file_client_args),
+    dict(
+        type='LoadPoints',
+        coord_type='LIDAR',
+        file_client_args=file_client_args),
     dict(
         type='LoadImages',
         file_client_args=file_client_args,
-        pad_shape=(1280, 1920)),
+        pad_shape=(1920, 1280)),
     # dict(
     #     type='LoadAnnos3D',
     #     with_bbox_3d=True,
@@ -84,6 +84,7 @@ train_pipeline = [
     
     dict(
         type='ResizeMultiViewImage',
+        # Target size (w, h)
         img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
         multiscale_mode='range',
         keep_ratio=False),

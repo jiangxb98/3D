@@ -51,10 +51,15 @@ class MONGODBBackend(BaseStorageBackend):
             try:
                 if filter_sem is None:
                     ret = [o['_id'] for o in self.get_collection(collection).find(filter, projection=[])]
-                elif filter_sem == "panseg_info":  # fix the bug of waymo.py
-                    ret = [o['_id'] for o in self.get_collection(collection).find() if o[filter_sem][0]]
-                elif filter_sem == "semseg_info":
-                    ret = [o['_id'] for o in self.get_collection(collection).find() if filter_sem in o.keys()]
+                # filter panseg_info or semseg_info.
+                else:
+                    # ret = [o['_id'] for o in self.get_collection(collection).find() if filter_sem in o.keys()]
+                    ret = []
+                    data_ = self.get_collection(collection)
+                    for i in range(100):
+                        o = data_.find({'_id':i})
+                        if filter_sem in o.keys():
+                            ret.append(o['_id'])
             except Exception as e:
                 print(e)
                 time.sleep(0.1)

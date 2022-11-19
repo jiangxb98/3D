@@ -71,7 +71,7 @@ class WaymoDataset(Custom3DDataset):
         # train len(self.panseg_frame_infos)=12296
         if self.load_panseg:
             self.panseg_frame_infos = self.read_semseg_infos(self.panseg_info_path, filter_sem='panseg_info')
-        # self.data_infos = self.semseg_frame_infos  # *********测试点***********
+        
         # process pipeline
         if pipeline is not None:
             self.pipeline = Compose(pipeline)
