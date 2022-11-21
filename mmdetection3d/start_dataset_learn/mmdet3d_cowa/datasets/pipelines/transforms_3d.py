@@ -151,7 +151,7 @@ class PadMultiViewImage:
                     padded_img = mmcv.impad_to_multiple(
                         results[key][i], self.size_divisor, pad_val=pad_val)
                 multi_pad_img.appen(padded_img)
-            results[key] = np.array(multi_pad_img)
+            results[key] = multi_pad_img
         results['pad_shape'] = [padded_img.shape for padded_img in multi_pad_img]
         results['pad_fixed_size'] = self.size
         results['pad_size_divisor'] = self.size_divisor
@@ -163,10 +163,11 @@ class PadMultiViewImage:
             multi_pad_masks = []
             for i in range(len(results['img'])):
                 pad_shape = results['pad_shape'][i][:2]
-                if results[key][i].shape[0] != 0:
-                    multi_pad_masks.append(results[key][i].pad(pad_shape, pad_val=pad_val))
-                else:
-                    multi_pad_masks.append(np.array([]))
+                # if results[key][i].shape[0] != 0:
+                #     multi_pad_masks.append(results[key][i].pad(pad_shape, pad_val=pad_val))
+                # else:
+                #     multi_pad_masks.append(np.array([]))
+                multi_pad_masks.append(results[key][i].pad(pad_shape, pad_val=pad_val))
             results[key] = multi_pad_masks
 
     def _pad_seg(self, results):
@@ -176,10 +177,11 @@ class PadMultiViewImage:
         for key in results.get('seg_fields', []):
             multi_pad_seg = []
             for i in range(len(results['img'])):
-                if results[key][i].shape[0] != 0:
-                    multi_pad_seg.append(mmcv.impad(results[key][i], shape=results['pad_shape'][i][:2], pad_val=pad_val))
-                else:
-                    multi_pad_seg.append(np.array([]))
+                # if results[key][i].shape[0] != 0:
+                #     multi_pad_seg.append(mmcv.impad(results[key][i], shape=results['pad_shape'][i][:2], pad_val=pad_val))
+                # else:
+                #     multi_pad_seg.append(np.array([]))
+                multi_pad_seg.append(mmcv.impad(results[key][i], shape=results['pad_shape'][i][:2], pad_val=pad_val))
             results[key] = multi_pad_seg
 
     def __call__(self, results):
@@ -264,7 +266,7 @@ class ResizeMultiViewImage:
                 multi_scale_factor.append(np.array([w_scale, h_scale, w_scale, h_scale],
                         dtype=np.float32))
                 
-            results[key] = np.array(multi_view_img)
+            results[key] = multi_view_img
             scale_factor = multi_scale_factor
 
             results['img_shape'] = [img.shape for img in multi_view_img]
@@ -278,36 +280,35 @@ class ResizeMultiViewImage:
         for key in results.get('bbox_fields', []):
             multi_gt_bboxes = []
             for i in range(len(results['img'])):
-                # if not None
-                if results[key][i].shape[0] != 0:
+                # if None
+                if (results[key][i] == np.array([-1,-1,-1,-1])).all():
+                    multi_gt_bboxes.append(np.array([-1,-1,-1,-1]))
+                # if  Not None
+                else:
                     bboxes = results[key][i] * results['scale_factor'][i]
                     if self.bbox_clip_border:
                         img_shape = results['img_shape'][i]
                         bboxes[:, 0::2] = np.clip(bboxes[:, 0::2], 0, img_shape[1])
                         bboxes[:, 1::2] = np.clip(bboxes[:, 1::2], 0, img_shape[0])
                     multi_gt_bboxes.append(bboxes)
-                # if None
-                else:
-                    multi_gt_bboxes.append(np.array([]))
-            results[key] = np.array(multi_gt_bboxes)
+
+            results[key] = multi_gt_bboxes
 
     def _resize_masks(self, results):
         """Resize masks with ``results['scale']``"""
         for key in results.get('mask_fields', []):
             multi_gt_masks = []
             for i in range(len(results['img'])):
-                if results[key][i].shape[0] != 0:
-                    if results[key] is None:
-                        continue
-                    # !!! both rescale and resize both are BitmapMasks(), not a np.array
-                    if self.keep_ratio:
-                        # to contrast origin of transforms
-                        results[key][i] = results[key][i].rescale(results['scale'][i])  
-                    else:
-                        new_shape=results['img_shape'][i][:2]
-                        multi_gt_masks.append(results[key][i].resize(new_shape))
+                if results[key] is None:
+                    continue
+                # !!! both rescale and resize both are BitmapMasks(), not a np.array
+                if self.keep_ratio:
+                    # to contrast origin of transforms
+                    results[key][i] = results[key][i].rescale(results['scale'][i])  
                 else:
-                    multi_gt_masks.append(np.array([]))
+                    new_shape=results['img_shape'][i][:2]
+                    multi_gt_masks.append(results[key][i].resize(new_shape))
+
             results[key] = multi_gt_masks
 
     def _resize_seg(self, results):
@@ -315,23 +316,21 @@ class ResizeMultiViewImage:
         for key in results.get('seg_fields', []):
             multi_seg = []
             for i in range(len(results['img'])):
-                if results[key][i].shape[0] != 0:
-                    if self.keep_ratio:
-                        gt_seg = mmcv.imrescale(
-                            results[key][i],
-                            results['scale'][i],
-                            interpolation='nearest',
-                            backend=self.backend)
-                    else:
-                        gt_seg = mmcv.imresize(
-                            results[key][i],
-                            results['scale'][i],
-                            interpolation='nearest',
-                            backend=self.backend)
-                    multi_seg.append(gt_seg)
+                if self.keep_ratio:
+                    gt_seg = mmcv.imrescale(
+                        results[key][i],
+                        results['scale'][i],
+                        interpolation='nearest',
+                        backend=self.backend)
                 else:
-                    multi_seg.append(np.array([]))
-            results[key] = multi_seg
+                    gt_seg = mmcv.imresize(
+                        results[key][i],
+                        results['scale'][i],
+                        interpolation='nearest',
+                        backend=self.backend)
+                multi_seg.append(gt_seg)
+
+            results[key] = np.stack(multi_seg, axis=0)
 
     def __call__(self, results):
         """Call function to resize images, bounding boxes, masks, semantic
@@ -402,12 +401,12 @@ class MultiViewCrop:
                 # crop the image
                 img = imgs[i][crop_y1:crop_y2, crop_x1:crop_x2, ...]
                 img_crop.append(img)
-            results[key] = np.array(img_crop)
+            results[key] = img_crop
         results['img_shape'] = [crop_size for i in range(len(results['img']))]
 
         # crop bboxes accordingly and clip to the image boundary
         for key in results.get('bbox_fields', []):
-            
+    
             offset_h = offset_wh[i][1]
             offset_w = offset_wh[i][0]
             crop_y1, crop_y2 = offset_h, offset_h + crop_size[0]
@@ -417,8 +416,8 @@ class MultiViewCrop:
             for i in range(len(results['img'])):
                 img_shape = results['img_shape'][i]
                 # if gt_bboxes is None, skip this image, continue
-                if (results[key][i].shape[0] == 0 and key == 'gt_bboxes'):
-                    bbox_crop.append(np.array([]))
+                if ((results[key][i] == np.array([-1,-1,-1,-1])).all() and key == 'gt_bboxes'):
+                    bbox_crop.append(np.array([-1,-1,-1,-1]))
                     continue
                 bboxes = results[key][i] - offset_wh[i]
                 # if no offset continue
@@ -431,20 +430,15 @@ class MultiViewCrop:
                 # If the crop does not contain any gt-bbox area, skip continue
                 valid_inds = (bboxes[:, 2] > bboxes[:, 0]) & (bboxes[:, 3] > bboxes[:, 1])
                 if key == 'gt_bboxes' and not valid_inds.any():
-                    bbox_crop.append(np.array([]))
-                    continue
+                    bbox_crop.append(np.array([-1,-1,-1,-1]))
 
                 # label fields. e.g. gt_labels and gt_labels_ignore
                 label_key = self.bbox2label.get(key)
                 if label_key in results:
-                    results[label_key][i] = results[label_key][i][valid_inds]
-
-                # mask fields, e.g. gt_masks and gt_masks_ignore
-                mask_key = self.bbox2mask.get(key)
-                if mask_key in results:
-                    results[mask_key][i] = results[mask_key][i][
-                        valid_inds.nonzero()[0]].crop(
-                            np.asarray([crop_x1, crop_y1, crop_x2, crop_y2]))
+                    if not valid_inds.any():
+                        results[label_key][i] = np.array([-1])
+                    else:
+                        results[label_key][i] = results[label_key][i][valid_inds]
             
             results[key] = bbox_crop
 
@@ -459,8 +453,19 @@ class MultiViewCrop:
                     sem_crop.append(results[key][i])
                     continue
                 sem_crop.append(results[key][i][crop_y1:crop_y2, crop_x1:crop_x2])
-            results[key] = sem_crop
 
+            results[key] = np.stack(sem_crop, axis=0)
+
+        # mask fields
+        for key in results.get('mask_fields',[]):
+            for i in range(len(results['img'])):
+                offset_h = offset_wh[i][1]
+                offset_w = offset_wh[i][0]
+                crop_y1, crop_y2 = offset_h, offset_h + crop_size[0]
+                crop_x1, crop_x2 = offset_w, offset_w + crop_size[1]
+                if offset_h == 0 and offset_w == 0:
+                    continue
+                results[key][i] = results[key][i].crop(np.asarray([crop_x1, crop_y1, crop_x2, crop_y2]))
         return results
 
     def __call__(self, results):

@@ -197,7 +197,7 @@ class LoadImages(object):
         results['pad_shape'] = self.pad_shape
         for i in range(len(results['img_info']['img_path_info'])):
             filename = results['img_info']['img_path_info'][i]['filename']
-            img = self._load_img(results, filename).transpose((1,0,2))
+            img = self._load_img(results, filename)
             results['img'].append(img)
             results['filename'].append(filename)
             results['img_shape'].append(img.shape)
@@ -221,19 +221,20 @@ class LoadAnnos(LoadAnnotations):
     def _load_bboxes(self, results):
         ann_info = results['ann_info']
         results['gt_bboxes'] = ann_info['gt_bboxes'].copy()  # some imgaes only front camera has 2d gt bbox
-
-        if self.denorm_bbox:
-            bbox_num = results['gt_bboxes'].shape[0]
-            if bbox_num != 0:
-                h, w = results['img_shape'][:2]
-                results['gt_bboxes'][:, 0::2] *= w
-                results['gt_bboxes'][:, 1::2] *= h
+        # if no gt_bboxes then is np.array([-1,-1,-1,-1])
+        for i in range(len(results['gt_bboxes'])):
+            if results['gt_bboxes'][i].shape[0] == 0:
+                results['gt_bboxes'][i] = np.array([-1,-1,-1,-1])      
         results['bbox_fields'].append('gt_bboxes')
 
         return results
     
     def _load_labels(self, results):
         results['gt_labels'] = results['ann_info']['gt_labels'].copy()
+        # if no gt_labels then is [-1]
+        for i in range(len(results['gt_labels'])):
+            if results['gt_labels'][i].shape[0] == 0:
+                results['gt_labels'][i] = np.array([-1])
         return results
 
     def _load_semantic_seg(self, results):
@@ -248,9 +249,11 @@ class LoadAnnos(LoadAnnotations):
         for pan_seg in pan_semantic_mask_path:
             mask_bytes = self.file_client.get(pan_seg)
             pan_semantic_mask = pan_semantic_mask_loader(results, mask_bytes, 'panseg_cls')
+            pan_semantic_mask.dtype = "int16"
             results['gt_semantic_seg'].append(pan_semantic_mask)
 
         results['seg_fields'].append('gt_semantic_seg')
+        results['gt_semantic_seg'] = results['gt_semantic_seg']
         return results
 
     def _load_masks(self, results):
@@ -265,10 +268,12 @@ class LoadAnnos(LoadAnnotations):
         for pan_seg in pan_instance_mask_path:   
             mask_bytes = self.file_client.get(pan_seg)
             pan_instance_mask = pan_instance_mask_loader(results, mask_bytes, 'panseg_instance_id')
-            # 需要确认mask的shape是HxW还是WxH
-            h, w = pan_instance_mask.shape[0], pan_instance_mask.shape[1]
+            pan_instance_mask.dtype = "int16"
+            # HxWx1 -->  1xHxW
+            pan_instance_mask = pan_instance_mask.transpose((2,0,1))
+            h, w = pan_instance_mask.shape[1], pan_instance_mask.shape[2]
             if self.poly2mask:
-                gt_masks = BitmapMasks(self._poly2mask(pan_instance_mask, h, w), h, w)
+                gt_masks = BitmapMasks(pan_instance_mask, h, w)
             else:
                 gt_masks = PolygonMasks(self.process_polygons(pan_instance_mask))
 

@@ -55,14 +55,14 @@ train_pipeline = [
         type='LoadImages',
         file_client_args=file_client_args,
         pad_shape=(1920, 1280)),
-    # dict(
-    #     type='LoadAnnos3D',
-    #     with_bbox_3d=True,
-    #     with_label_3d=True,
-    #     with_mask_3d=True,
-    #     with_seg_3d=True,
-    #     file_client_args=file_client_args,
-    #     ),
+    dict(
+        type='LoadAnnos3D',
+        with_bbox_3d=True,
+        with_label_3d=True,
+        with_mask_3d=True,
+        with_seg_3d=True,
+        file_client_args=file_client_args,
+        ),
     dict(
         type='LoadAnnos',
         with_bbox=True,
@@ -94,10 +94,11 @@ train_pipeline = [
     dict(
         type='Collect3D', 
         keys=['points', 'gt_bboxes_3d', 'gt_labels_3d', 'pts_semantic_mask', 
-            'pts_instance_mask', 'gt_bboxes','gt_labels', 'img' \
+            'pts_instance_mask', 'gt_bboxes','gt_labels', 'img',
             'gt_masks','gt_semantic_seg'],
-        meta_keys=['box_mode_3d','filename','img_shape','lidar2img',
-            'sample_idx','img_info','anno_info','pts_info',]
+        meta_keys=['box_mode_3d','filename','img_shape','ori_shape',
+            'pad_shape','scale','scale_factor','keep_ratio','lidar2img',
+            'sample_idx','img_info','anno_info','pts_info',],
     )
 ]
 

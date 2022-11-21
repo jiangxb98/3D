@@ -63,7 +63,7 @@ class WaymoDataset(Custom3DDataset):
         self._skip_type_keys = None
 
         # load annotations
-        # 这个是所有在training/infos的数据(每帧点云)索引
+        # 这个是所有在training/infos的数据(每帧点云)索引，如果用语义信息，就建议用语义的索引覆盖掉
         self.data_infos = self.load_annotations(self.info_path)
         # 这个是load所有的语义标签在OSS上的路径
         if self.load_semseg:  # 23692
@@ -102,6 +102,8 @@ class WaymoDataset(Custom3DDataset):
     def get_data_info(self, index):
         if self.infos_reader is None:
             self.infos_reader = mmcv.FileClient(**self.datainfo_client_args)
+        # test index=79
+        index = 79
         info = self.infos_reader.get((self.info_path, self.data_infos[index]))  # 进入mongodb.py改写的get方法 get a frame info
         sample_idx = info['sample_idx']
 
