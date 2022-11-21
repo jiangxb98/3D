@@ -257,7 +257,8 @@ class LoadAnnos(LoadAnnotations):
         return results
 
     def _load_masks(self, results):
-        pan_instance_mask_path = results['ann_info']['pan_instance_mask_path']  # instance mask and semantic have the same path
+        # instance mask and semantic have the same path
+        pan_instance_mask_path = results['ann_info']['pan_instance_mask_path']
         pan_instance_mask_loader = results['ann_info']['pan_instance_mask_loader']
 
         if self.file_client is None:
@@ -265,7 +266,7 @@ class LoadAnnos(LoadAnnotations):
 
         results['gt_masks'] = []
 
-        for pan_seg in pan_instance_mask_path:   
+        for pan_seg in pan_instance_mask_path:
             mask_bytes = self.file_client.get(pan_seg)
             pan_instance_mask = pan_instance_mask_loader(results, mask_bytes, 'panseg_instance_id')
             pan_instance_mask.dtype = "int16"

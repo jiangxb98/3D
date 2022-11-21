@@ -53,8 +53,7 @@ train_pipeline = [
         file_client_args=file_client_args),
     dict(
         type='LoadImages',
-        file_client_args=file_client_args,
-        pad_shape=(1920, 1280)),
+        file_client_args=file_client_args,),
     dict(
         type='LoadAnnos3D',
         with_bbox_3d=True,

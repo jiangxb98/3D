@@ -113,7 +113,7 @@ class PadMultiViewImage:
                  size=None,
                  size_divisor=None,
                  pad_to_square=False,
-                 pad_val=dict(img=0, masks=-1, seg=255)):
+                 pad_val=dict(img=0, masks=0, seg=255)):
         self.size = size
         self.size_divisor = size_divisor
         if isinstance(pad_val, float) or isinstance(pad_val, int):
@@ -297,10 +297,10 @@ class ResizeMultiViewImage:
     def _resize_masks(self, results):
         """Resize masks with ``results['scale']``"""
         for key in results.get('mask_fields', []):
+            if results[key] is None:
+                continue
             multi_gt_masks = []
             for i in range(len(results['img'])):
-                if results[key] is None:
-                    continue
                 # !!! both rescale and resize both are BitmapMasks(), not a np.array
                 if self.keep_ratio:
                     # to contrast origin of transforms
@@ -328,6 +328,7 @@ class ResizeMultiViewImage:
                         results['scale'][i],
                         interpolation='nearest',
                         backend=self.backend)
+                # if results['scale'][i][::-1] == results[key][i].shape, the gt_seg=results[key][i]
                 multi_seg.append(gt_seg)
 
             results[key] = np.stack(multi_seg, axis=0)
