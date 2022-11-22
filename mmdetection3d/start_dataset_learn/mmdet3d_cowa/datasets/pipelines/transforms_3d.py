@@ -113,7 +113,7 @@ class PadMultiViewImage:
                  size=None,
                  size_divisor=None,
                  pad_to_square=False,
-                 pad_val=dict(img=0, masks=0, seg=255)):
+                 pad_val=dict(img=0, masks=0, seg=-1)):
         self.size = size
         self.size_divisor = size_divisor
         if isinstance(pad_val, float) or isinstance(pad_val, int):
@@ -139,20 +139,20 @@ class PadMultiViewImage:
         """Pad images according to ``self.size``."""
         pad_val = self.pad_val.get('img', 0)
         for key in results.get('img_fields', ['img']):
-            multi_pad_img = []
-            for i in range(len(results['img'])):
+            for i in range(len(results[key])):
+                if self.size[i] == results[key][i].shape[:2]:
+                    continue
                 if self.pad_to_square:
                     max_size = max(results[key][i].shape[:2])
                     self.size = (max_size, max_size)
                 if self.size is not None:
                     padded_img = mmcv.impad(
-                        results[key][i], shape=self.size[i], pad_val=pad_val)
+                        results[key][i], shape=self.size[i][:2], pad_val=pad_val)
                 elif self.size_divisor is not None:
                     padded_img = mmcv.impad_to_multiple(
                         results[key][i], self.size_divisor, pad_val=pad_val)
-                multi_pad_img.appen(padded_img)
-            results[key] = multi_pad_img
-        results['pad_shape'] = [padded_img.shape for padded_img in multi_pad_img]
+                results[key][i] = padded_img
+        results['pad_shape'] = [padded_img.shape for padded_img in results[key]]
         results['pad_fixed_size'] = self.size
         results['pad_size_divisor'] = self.size_divisor
 
@@ -160,29 +160,22 @@ class PadMultiViewImage:
         """Pad masks according to ``results['pad_shape']``."""
         pad_val = self.pad_val.get('masks', 0)
         for key in results.get('mask_fields', []):
-            multi_pad_masks = []
             for i in range(len(results['img'])):
+                if self.size[i] == results[key][i].masks.shape[1:3]:
+                    continue
                 pad_shape = results['pad_shape'][i][:2]
-                # if results[key][i].shape[0] != 0:
-                #     multi_pad_masks.append(results[key][i].pad(pad_shape, pad_val=pad_val))
-                # else:
-                #     multi_pad_masks.append(np.array([]))
-                multi_pad_masks.append(results[key][i].pad(pad_shape, pad_val=pad_val))
-            results[key] = multi_pad_masks
+                results[key][i] = results[key][i].pad(pad_shape, pad_val=pad_val)
+
 
     def _pad_seg(self, results):
         """Pad semantic segmentation map according to
         ``results['pad_shape']``."""
-        pad_val = self.pad_val.get('seg', 255)
+        pad_val = self.pad_val.get('seg', -1)
         for key in results.get('seg_fields', []):
-            multi_pad_seg = []
             for i in range(len(results['img'])):
-                # if results[key][i].shape[0] != 0:
-                #     multi_pad_seg.append(mmcv.impad(results[key][i], shape=results['pad_shape'][i][:2], pad_val=pad_val))
-                # else:
-                #     multi_pad_seg.append(np.array([]))
-                multi_pad_seg.append(mmcv.impad(results[key][i], shape=results['pad_shape'][i][:2], pad_val=pad_val))
-            results[key] = multi_pad_seg
+                if self.size[i] == results[key][i].shape:
+                    continue
+                results[key][i] = mmcv.impad(results[key][i], shape=results['pad_shape'][i][:2], pad_val=pad_val)
 
     def __call__(self, results):
         """Call function to pad images, masks, semantic segmentation maps.
@@ -478,4 +471,45 @@ class MultiViewCrop:
         repr_str += f'(crop_size={self.crop_size}, '
         repr_str += f'crop_type={self.crop_type}, '
         repr_str += f'bbox_clip_border={self.bbox_clip_border})'
+        return repr_str
+
+
+@PIPELINES.register_module()
+class NormalizeMultiViewImage:
+    """Normalize the image.
+
+    Added key is "img_norm_cfg".
+
+    Args:
+        mean (sequence): Mean values of 3 channels.
+        std (sequence): Std values of 3 channels.
+        to_rgb (bool): Whether to convert the image from BGR to RGB,
+            default is true.
+    """
+    def __init__(self, mean, std, to_rgb=True):
+        self.mean = np.array(mean, dtype=np.float32)
+        self.std = np.array(std, dtype=np.float32)
+        self.to_rgb = to_rgb
+
+    def __call__(self, results):
+        """Call function to normalize images.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Normalized results, 'img_norm_cfg' key is added into
+                result dict.
+        """
+        for key in results.get('img_fields', ['img']):
+            for i in range(len(results[key])):
+                results[key][i] = mmcv.imnormalize(results[key][i], self.mean, self.std,
+                                                self.to_rgb)
+        results['img_norm_cfg'] = dict(
+            mean=self.mean, std=self.std, to_rgb=self.to_rgb)
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(mean={self.mean}, std={self.std}, to_rgb={self.to_rgb})'
         return repr_str

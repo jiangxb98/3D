@@ -7,6 +7,7 @@ from io import BytesIO
 from mmdet3d.datasets.builder import PIPELINES
 import torch
 from mmdet.core import BitmapMasks, PolygonMasks
+import random
 
 @PIPELINES.register_module()
 class LoadPoints(object):
@@ -138,7 +139,8 @@ class LoadAnnos3D(LoadAnnotations3D):
         super(LoadAnnos3D, self).__init__(*args, **kwargs)
 
     def _load_masks_3d(self, results):
-        pts_instance_mask_path = results['ann_info']['pts_instance_mask_path']  # instance mask and semantic have the same path
+        # instance mask and semantic have the same path
+        pts_instance_mask_path = results['ann_info']['pts_instance_mask_path']
         pts_instance_mask_loader = results['ann_info']['pts_instance_mask_loader']
 
         if self.file_client is None:
@@ -184,7 +186,7 @@ class LoadImages(object):
         # not need loader, use mmcv.imfrombytes
         # img = results['img_info']['img_loader'](results, pts_bytes)
         img = mmcv.imfrombytes(pts_bytes, flag=self.color_type)
-        # or tf.image.decode_jpeg(pts_bytes) both two fun have same size (1280,1920,3)
+        # or tf.image.decode_jpeg(pts_bytes) both two function have the same size (1280,1920,3)
         return img        
 
     def __call__(self, results):
@@ -220,7 +222,8 @@ class LoadAnnos(LoadAnnotations):
     
     def _load_bboxes(self, results):
         ann_info = results['ann_info']
-        results['gt_bboxes'] = ann_info['gt_bboxes'].copy()  # some imgaes only front camera has 2d gt bbox
+        # some imgaes only front camera has 2d gt bbox
+        results['gt_bboxes'] = ann_info['gt_bboxes'].copy()
         # if no gt_bboxes then is np.array([-1,-1,-1,-1])
         for i in range(len(results['gt_bboxes'])):
             if results['gt_bboxes'][i].shape[0] == 0:
@@ -248,7 +251,7 @@ class LoadAnnos(LoadAnnotations):
 
         for pan_seg in pan_semantic_mask_path:
             mask_bytes = self.file_client.get(pan_seg)
-            pan_semantic_mask = pan_semantic_mask_loader(results, mask_bytes, 'panseg_cls')
+            pan_semantic_mask = pan_semantic_mask_loader(results, mask_bytes, 'panseg_cls').squeeze()
             pan_semantic_mask.dtype = "int16"
             results['gt_semantic_seg'].append(pan_semantic_mask)
 
@@ -281,4 +284,104 @@ class LoadAnnos(LoadAnnotations):
             results['gt_masks'].append(gt_masks)
 
         results['mask_fields'].append('gt_masks')
+        return results
+
+
+@PIPELINES.register_module()
+class FilterLabelImage:
+    '''filter pan and segment label of 2d and 3d
+
+    - filter_class_name: the class to use
+    - with_mask: True or False
+    - with_seg: True or False
+    - with_mask_3d: True or False
+    - with_seg_3d: True or False
+    '''
+    def __init__(self,
+                filter_class_name=None,
+                with_mask=True,
+                with_seg=True,
+                with_mask_3d=True,
+                with_seg_3d=True,
+                *arg, **kwargs):
+        self.filter_class_name = filter_class_name
+        self.with_mask = with_mask
+        self.with_seg = with_seg
+        self.with_mask_3d = with_mask_3d
+        self.with_seg_3d = with_seg_3d
+        # Car=2,Pedestrian=9,Cyclist=10
+        self.seg_calss = [2,9,10]
+        # Car=1,Pedestrian=7,Bicyclist=6
+        self.seg_3d_class = [1,7,6]
+    
+    def __call__(self, results):
+        '''return the new semantic label, and instance only filtered
+        - label: Car=0, Pedestrian=1, Cyclist=2
+        - seg -1 is uncorrelated, instance only filtered
+        '''
+        img_num = len(results['img'])
+        for i in range(img_num):
+            if self.with_seg:
+                semantic_seg = results['gt_semantic_seg'][i].squeeze()
+                tmp = np.zeros(semantic_seg.shape)
+                for j in range(len(self.seg_calss)):
+                    tmp += np.where(semantic_seg==self.seg_calss[j], j+1, 0)
+                results['gt_semantic_seg'][i] = tmp - 1
+            if self.with_mask:
+                seg_ind = (tmp-1 >= 0)  # True or False array
+                new_mask = results['gt_masks'][i].masks * seg_ind  # new_mask shape=(1,1280,1920)
+                results['gt_masks'][i] = BitmapMasks(new_mask, new_mask.shape[1], new_mask.shape[2])
+        
+        if self.with_mask_3d:
+            semantic_seg_3d = results['pts_semantic_mask'].squeeze()
+            tmp_3d = np.zeros(semantic_seg_3d.shape)
+            for i in range(len(self.seg_3d_class)):
+                tmp_3d += np.where(semantic_seg_3d==self.seg_3d_class[i], i+1, 0)
+            results['pts_semantic_seg'] = tmp_3d - 1
+        if self.with_seg_3d:
+            seg_ind_3d = (tmp_3d-1 >= 0)
+            results['pts_instance_mask'] = results['pts_instance_mask'] * seg_ind_3d
+
+        return results
+
+
+@PIPELINES.register_module()
+class SampleFrameImage:
+    def __init__(self,
+                sample = 'random',
+                guide = 'gt_bboxes'):
+        self.sample = sample
+        self.guide = guide
+    
+    def _random_sample(self, results):
+        ''''each frame random select a image which has 2d gt_bboxes
+        '''
+        results['sample_img_id'] = []
+        if self.guide == 'gt_bboxes':
+            for i in range(len(results['gt_labels'])):
+                gt_label = results['gt_labels'][i]
+                if (gt_label==-1).all():
+                    continue
+                else:
+                    results['sample_image_id'].append(i)
+            sample_image_id = random.choice(results['sample_img_id'])
+            results['sample_img_id'] = sample_image_id
+        
+        results['img'] = results['img'][sample_image_id]
+        results['gt_bboxes'] = results['gt_bboxes'][sample_image_id]
+        results['gt_masks'] = results['gt_masks'][sample_image_id]
+        results['gt_semantic_seg'] = results['gt_semantic_seg'][sample_image_id]
+        results.update(dict(img_sample='random'))
+        return results
+        
+    def _resample(self, results):
+        pass
+
+    def __call__(self, results):
+
+        if self.sample == 'random':
+            results = self._random_sample(results)
+        elif self.sample == 'resample':
+            results = self._resample(results)
+
         return results

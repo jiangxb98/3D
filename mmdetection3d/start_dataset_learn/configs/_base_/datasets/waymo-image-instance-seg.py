@@ -28,27 +28,8 @@ panseg_names = ['Undefined', 'Ego Vehicle', 'Car', 'Truck', 'Bus',
 
 point_cloud_range = [-74.88, -74.88, -2, 74.88, 74.88, 4]
 input_modality = dict(use_lidar=True, use_camera=True)
-
-# db_sampler = dict(
-#     type='DataBaseSampler',
-#     info_path='training/dbinfos/',
-#     rate=1.0,
-#     filter=dict(
-#         Car=dict(difficulty={'$nin': [-1]},
-#                  num_points_in_gt={'$gte': 5}),
-#         Pedestrian=dict(difficulty={'$nin': [-1]},
-#                         num_points_in_gt={'$gte': 10}),
-#         Cyclist=dict(difficulty={'$nin': [-1]},
-#                      num_points_in_gt={'$gte': 10})),
-#     classes=class_names,
-#     sample_groups=dict(Car=15, Pedestrian=10, Cyclist=10),
-#     datainfo_client_args=datainfo_client_args,
-#     points_loader=[
-#         dict(
-#             type='LoadPoints',
-#             coord_type='LIDAR',
-#             file_client_args=file_client_args)])
-
+img_norm_cfg = dict(
+    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 train_pipeline = [
     dict(
         type='LoadPoints',
@@ -56,7 +37,7 @@ train_pipeline = [
         file_client_args=file_client_args),
     dict(
         type='LoadImages',
-        file_client_args=file_client_args,),
+        file_client_args=file_client_args),
     dict(
         type='LoadAnnos3D',
         with_bbox_3d=True,
@@ -73,35 +54,43 @@ train_pipeline = [
         with_seg=True,
         file_client_args=file_client_args
     ),
-    # dict(
-    #     type='RandomFlip3D', 
-    #     sync_2d=False,
-    #     flip_ratio_bev_horizontal=0.5),
-    # dict(type='PointsRangeFilter',
-    #      point_cloud_range=point_cloud_range),
-    # dict(type='ObjectRangeFilter',
-    #      point_cloud_range=point_cloud_range),
-    # dict(type='FilterBoxWithMinimumPointsCount', num_points=1),
-    # dict(type='PointShuffle'),
-    
     dict(
-        type='ResizeMultiViewImage',
-        # Target size (w, h)
-        img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
-        multiscale_mode='range',
-        keep_ratio=False),
-
+        type='FilterLabelImage',
+        filter_calss_name=class_names,
+        with_mask=True,
+        with_seg=True,
+        with_mask_3d=True,
+        with_seg_3d=True,
+    ),
+    # dict(
+    #     type='ResizeMultiViewImage',
+    #     # Target size (w, h)
+    #     img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
+    #     multiscale_mode='range',
+    #     keep_ratio=False),
+    dict(type='NormalizeMultiViewImage', **img_norm_cfg),
+    dict(
+        type='PadMultiViewImage',
+        size=[(1280, 1920),(1280, 1920),(1280, 1920),(1280, 1920),(1280, 1920)],  #HxW
+        ),
+    dict(
+        type='SampleFrameImage', 
+        sample='random',
+        guide='gt_bboxes',
+        ),  # random or resample
     # To DataContainer
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', 
+        # keys=['points', 'gt_bboxes','gt_labels', 'img'],
         keys=['points', 'gt_bboxes_3d', 'gt_labels_3d', 'pts_semantic_mask', 
             'pts_instance_mask', 'gt_bboxes','gt_labels', 'img',
             'gt_masks','gt_semantic_seg'],
-        meta_keys=['box_mode_3d','filename','img_shape','ori_shape',
-            'pad_shape','scale','scale_factor','keep_ratio','lidar2img',
-            'sample_idx','img_info','anno_info','pts_info','img_norm_cfg',
-            'pad_fixed_size', 'pad_size_divisor'],
+        meta_keys=['filename','img_shape','ori_shape','pad_shape',
+            'scale','scale_factor','keep_ratio','lidar2img',
+            'sample_idx','img_info','anno_info','pts_info',
+            'img_norm_cfg', 'pad_fixed_size', 'pad_size_divisor',
+            'sample_img_id','img_sample'],
     )
 ]
 
@@ -111,36 +100,55 @@ test_pipeline = [
         coord_type='LIDAR',
         file_client_args=file_client_args),
     dict(
+        type='LoadImages',
+        file_client_args=file_client_args,),
+    dict(
         type='MultiScaleFlipAug3D',
-        img_scale=(1333, 800),
+        img_scale=(1920, 1280),
         pts_scale_ratio=1,
         flip=False,
         transforms=[
             dict(
-                type='GlobalRotScaleTrans',
-                rot_range=[0, 0],
-                scale_ratio_range=[1., 1.],
-                translation_std=[0, 0, 0]),
-            dict(type='RandomFlip3D'),
-            dict(type='PointsRangeFilter',
-                 point_cloud_range=point_cloud_range),
-            dict(
-                type='DefaultFormatBundle3D',
-                class_names=class_names,
-                with_label=False),
-            dict(type='Collect3D', keys=['points'])
+                type='ResizeMultiViewImage',
+                # Target size (w, h)
+                img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
+                multiscale_mode='range',
+                keep_ratio=False),
+            dict(type='DefaultFormatBundle3D', class_names=class_names),
+            dict(type='Collect3D', keys=['img'])
         ])
 ]
 eval_pipeline = [
-    # dict(
-    #     type='LoadPoints',
-    #     coord_type='LIDAR',
-    #     file_client_args=file_client_args),
     dict(
-        type='DefaultFormatBundle3D',
-        class_names=class_names,
-        with_label=False),
-    dict(type='Collect3D', keys=['points'])
+        type='LoadPoints',
+        coord_type='LIDAR',
+        file_client_args=file_client_args),
+    dict(
+        type='LoadImages',
+        file_client_args=file_client_args,),
+    dict(
+        type='LoadAnnos',
+        with_bbox=False,
+        with_label=True,
+        with_mask=True,
+        with_seg=False,
+        file_client_args=file_client_args
+    ),
+    dict(
+        type='MultiScaleFlipAug3D',
+        img_scale=(1920, 1280),
+        pts_scale_ratio=1,
+        flip=False,
+        transforms=[
+            dict(
+                type='ResizeMultiViewImage',
+                # Target size (w, h)
+                img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
+                multiscale_mode='range',
+                keep_ratio=False),
+            dict(type='DefaultFormatBundle3D', class_names=class_names),
+            dict(type='Collect3D', keys=['img','gt_masks'])
+        ])
 ]
 
 data = dict(
@@ -164,12 +172,12 @@ data = dict(
         semseg_info_path='training/infos',  # semantic and instance same path
         # 2d segmentation
         load_panseg=True,  
-        panseg_classes = panseg_names,
+        panseg_classes = class_names,
         panseg_info_path='training/infos',  # semantic and instance same path
         pipeline=train_pipeline),
     val=dict(
         type=dataset_type,
-        info_path='validation/infos',
+        info_path='training/infos',
         datainfo_client_args=datainfo_client_args,
         pipeline=test_pipeline,
         modality=input_modality,
@@ -179,14 +187,14 @@ data = dict(
         # 3d segmentation
         load_semseg=False,
         semseg_classes=semseg_names,
-        semseg_info_path='validation/infos',
+        semseg_info_path='training/infos',
         # 2d segmentation
-        load_panseg=False,  
-        panseg_classes = panseg_names,
-        panseg_info_path='validation/infos',),
+        load_panseg=True,  
+        panseg_classes = class_names,
+        panseg_info_path='training/infos',),
     test=dict(
         type=dataset_type,
-        info_path='test/infos',
+        info_path='training/infos',
         datainfo_client_args=datainfo_client_args,
         pipeline=test_pipeline,
         modality=input_modality,
@@ -194,13 +202,13 @@ data = dict(
         test_mode=True,
         box_type_3d='LiDAR',
         # 3d segmentation
-        load_semseg=True,
+        load_semseg=False,
         semseg_classes=semseg_names,
-        semseg_info_path='test/infos',
+        semseg_info_path='training/infos',
         # 2d segmentation
-        load_panseg=False,  
-        panseg_classes = panseg_names,
-        panseg_info_path='test/infos',))        
+        load_panseg=True,  
+        panseg_classes = class_names,
+        panseg_info_path='training/infos',))        
 
 evaluation = dict(interval=24, pipeline=eval_pipeline)
 custom_imports = dict(

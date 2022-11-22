@@ -78,7 +78,7 @@ class WaymoPrep(object):
         self.lidar_list = [
             '_FRONT', '_FRONT_RIGHT', '_FRONT_LEFT', '_SIDE_RIGHT',
             '_SIDE_LEFT'
-        ]   # 五个雷达
+        ]
         self.type_list = ['DontCare', 'Car', 'Pedestrian', 'Sign', 'Cyclist']
 
         self.load_dir = load_dir
@@ -106,10 +106,10 @@ class WaymoPrep(object):
 
     def convert(self):
         print('Start converting ...')
-        data_client = Minio(**self.minio_cfg)
-        found = data_client.bucket_exists(self.bucket)
-        if not found:
-            data_client.make_bucket(self.bucket)
+        # data_client = Minio(**self.minio_cfg)
+        # found = data_client.bucket_exists(self.bucket)
+        # if not found:
+        #     data_client.make_bucket(self.bucket)
         if self.workers == 0:
             result = []
             for idx in mmcv.track_iter_progress(range(len(self))):
@@ -120,8 +120,8 @@ class WaymoPrep(object):
                                                   range(len(self)),
                                                   self.workers)
         print('\nOrganizing ...')
-        infos_client = MongoClient(**self.mongo_cfg)
-        infos_database = infos_client[self.database]
+        # infos_client = MongoClient(**self.mongo_cfg)
+        # infos_database = infos_client[self.database]
 
         gtdb_infos = {}
         frames_infos = []
@@ -131,37 +131,37 @@ class WaymoPrep(object):
 
         print(f'\nDumping {len(frames_infos)} items'
               f'into mongodb collection {self.infos_fname} ...')
-        while True:
-            try:
-                if self.infos_fname in infos_database.list_collection_names():
-                    infos_database.drop_collection(self.infos_fname)
-                infos_collection = infos_database.create_collection(
-                    self.infos_fname)
-                infos_collection.insert_many(frames_infos)
-                pass
-            except Exception as e:
-                print(e)
-                time.sleep(0.1)
-                continue
-            break
+        # while True:
+        #     try:
+        #         if self.infos_fname in infos_database.list_collection_names():
+        #             infos_database.drop_collection(self.infos_fname)
+        #         infos_collection = infos_database.create_collection(
+        #             self.infos_fname)
+        #         infos_collection.insert_many(frames_infos)
+        #         pass
+        #     except Exception as e:
+        #         print(e)
+        #         time.sleep(0.1)
+        #         continue
+        #     break
 
         for cls in gtdb_infos:
             dbinfos_fname = self.dbinfos_fname.format(cls)
             print(f'\nDumping {len(gtdb_infos[cls])} items'
                   f' dbinfos into mongodb collection {dbinfos_fname} ...')
-            while True:
-                try:
-                    if dbinfos_fname in infos_database.list_collection_names():
-                        infos_database.drop_collection(dbinfos_fname)
-                    dbinfos_collection = infos_database.create_collection(
-                        dbinfos_fname)
-                    dbinfos_collection.insert_many(gtdb_infos[cls])
-                    pass
-                except Exception as e:
-                    print(e)
-                    time.sleep(0.1)
-                    continue
-                break
+            # while True:
+            #     try:
+            #         if dbinfos_fname in infos_database.list_collection_names():
+            #             infos_database.drop_collection(dbinfos_fname)
+            #         dbinfos_collection = infos_database.create_collection(
+            #             dbinfos_fname)
+            #         dbinfos_collection.insert_many(gtdb_infos[cls])
+            #         pass
+            #     except Exception as e:
+            #         print(e)
+            #         time.sleep(0.1)
+            #         continue
+            #     break
 
         print('\nFinished ...')
 
@@ -173,8 +173,8 @@ class WaymoPrep(object):
         frame_infos = []
         gtdb_tracking = []
         gtdb_infos = dict()
-        data_client = Minio(**self.minio_cfg)
-        # data_client = None  # 防止上传，一定注意workers=0,设置好！ mongodb也得注释掉，不然会清空
+        # data_client = Minio(**self.minio_cfg)
+        data_client = None  # 防止上传，一定注意workers=0,设置好！ mongodb也得注释掉，不然会清空
         # 迭代遍历dataset，获取每帧的信息
         for frame_idx, data in enumerate(dataset):
             sample_idx = self.sample_index(file_idx, frame_idx)
@@ -225,13 +225,6 @@ class WaymoPrep(object):
             
             # 获取语义标签
             if self.load_semseg and frame.images[0].camera_segmentation_label.panoptic_label:
-                # camera_left_to_right_order = [dataset_pb2.CameraName.SIDE_LEFT, # 4-1
-                #                 dataset_pb2.CameraName.FRONT_LEFT,            # 2-1
-                #                 dataset_pb2.CameraName.FRONT,                 # 1-1
-                #                 dataset_pb2.CameraName.FRONT_RIGHT,           # 3-1
-                #                 dataset_pb2.CameraName.SIDE_RIGHT,            # 5-1
-                #                 dataset_pb2.CameraName.UNKNOW]                # 0-1
-    
                 # Decode a single panoptic label.
                 panoptic_label = camera_segmentation_utils.decode_single_panoptic_label_from_proto(
                     img.camera_segmentation_label
@@ -242,29 +235,29 @@ class WaymoPrep(object):
                     panoptic_label,
                     img.camera_segmentation_label.panoptic_label_divisor
                 )
-                while True:
-                    try:
-                        buf = io.BytesIO()
-                        np.savez_compressed(buf, panseg_cls=semantic_label, panseg_instance_id=instance_label)
-                        buf.seek(0, 2)
-                        buf_size = buf.tell()
-                        buf.seek(0, 0)
-                        client.put_object(self.bucket, panseg_path, buf, buf_size)
-                    except Exception as e:
-                        print(e)
-                        time.sleep(0.1)
-                        continue
-                    break
+                # while True:
+                #     try:
+                #         buf = io.BytesIO()
+                #         np.savez_compressed(buf, panseg_cls=semantic_label, panseg_instance_id=instance_label)
+                #         buf.seek(0, 2)
+                #         buf_size = buf.tell()
+                #         buf.seek(0, 0)
+                #         client.put_object(self.bucket, panseg_path, buf, buf_size)
+                #     except Exception as e:
+                #         print(e)
+                #         time.sleep(0.1)
+                #         continue
+                #     break
                 frame_info['panseg_info'][img.name - 1]['path'] = panseg_path
-            while True:
-                try:
-                    client.put_object(self.bucket, img_path,
-                                      io.BytesIO(img.image), len(img.image))
-                except Exception as e:
-                    print(e)
-                    time.sleep(0.1)
-                    continue
-                break
+            # while True:
+            #     try:
+            #         client.put_object(self.bucket, img_path,
+            #                           io.BytesIO(img.image), len(img.image))
+            #     except Exception as e:
+            #         print(e)
+            #         time.sleep(0.1)
+            #         continue
+            #     break
 
     def save_calib(self, frame, sample_idx, frame_info):
         # waymo front camera to kitti reference camera 从waymo相机坐标系转到kitti相机坐标系
@@ -397,19 +390,19 @@ class WaymoPrep(object):
             frame_info['pts_info']['range_image_shape'].append(
                 list(range_images[c.name][0].shape.dims))
 
-        while True:
-            try:
-                buf = io.BytesIO()
-                np.save(buf, point_cloud)
-                buf.seek(0, 2)
-                buf_size = buf.tell()
-                buf.seek(0, 0)
-                client.put_object(self.bucket, pc_path, buf, buf_size)
-            except Exception as e:
-                print(e)
-                time.sleep(0.1)
-                continue
-            break
+        # while True:
+        #     try:
+        #         buf = io.BytesIO()
+        #         np.save(buf, point_cloud)
+        #         buf.seek(0, 2)
+        #         buf_size = buf.tell()
+        #         buf.seek(0, 0)
+        #         client.put_object(self.bucket, pc_path, buf, buf_size)
+        #     except Exception as e:
+        #         print(e)
+        #         time.sleep(0.1)
+        #         continue
+        #     break
 
         # Point sematic & instance segmentation labels
         if self.load_semseg and frame.lasers[0].ri_return1.segmentation_label_compressed:
@@ -431,19 +424,19 @@ class WaymoPrep(object):
             semseg_labels['semseg_cls'] = point_labels_all[:, 1]
             semseg_labels['instance_id'] = point_labels_all[:, 0]
 
-            while True:
-                try:
-                    buf = io.BytesIO()
-                    np.save(buf, semseg_labels)
-                    buf.seek(0, 2)
-                    buf_size = buf.tell()
-                    buf.seek(0, 0)
-                    client.put_object(self.bucket, semseg_path, buf, buf_size)
-                except Exception as e:
-                    print(e)
-                    time.sleep(0.1)
-                    continue
-                break
+            # while True:
+            #     try:
+            #         buf = io.BytesIO()
+            #         np.save(buf, semseg_labels)
+            #         buf.seek(0, 2)
+            #         buf_size = buf.tell()
+            #         buf.seek(0, 0)
+            #         client.put_object(self.bucket, semseg_path, buf, buf_size)
+            #     except Exception as e:
+            #         print(e)
+            #         time.sleep(0.1)
+            #         continue
+            #     break
 
             frame_info['semseg_info'] = dict(path=semseg_path)
 
@@ -515,19 +508,19 @@ class WaymoPrep(object):
             obj_points = points[obj_mask]
             gtdb_pc_path = f'{self.gtdb_prefix}/{sample_idx}_{obj_name}_{obj_idx}'
 
-            while True:
-                try:
-                    buf = io.BytesIO()
-                    np.save(buf, obj_points)
-                    buf.seek(0, 2)
-                    buf_size = buf.tell()
-                    buf.seek(0, 0)
-                    client.put_object(self.bucket, gtdb_pc_path, buf, buf_size)
-                except Exception as e:
-                    print(e)
-                    time.sleep(0.1)
-                    continue
-                break
+            # while True:
+            #     try:
+            #         buf = io.BytesIO()
+            #         np.save(buf, obj_points)
+            #         buf.seek(0, 2)
+            #         buf_size = buf.tell()
+            #         buf.seek(0, 0)
+            #         client.put_object(self.bucket, gtdb_pc_path, buf, buf_size)
+            #     except Exception as e:
+            #         print(e)
+            #         time.sleep(0.1)
+            #         continue
+            #     break
 
             obj_sweeps = []
             for t in gtdb_tracking[-self.sweeps:][::-1]:
@@ -733,18 +726,19 @@ if __name__ == '__main__':
     in_dir = '/disk/deepdata/dataset/waymo_v1.4/'
     bucket = 'ai-waymo-v1.4'
     database = 'ai-waymo-v1_4'
-    workers = 32  # 如何是0就是单进程
+    workers = 0  # 如何是0就是单进程
     splits = ['training', 'validation', 'testing']
 
     minio_cfg = dict(
-        endpoint='ossapi.cowarobot.cn:9000',
-        access_key='abcdef',
-        secret_key='12345678',
-        region='shjd-oss',
-        secure=False)
+        # endpoint='ossapi.cowarobot.cn:9000',
+        # access_key='abcdef',
+        # secret_key='12345678',
+        # region='shjd-oss',
+        # secure=False,
+        )
 
     mongo_cfg = dict(
-        host="mongodb://root:root@172.16.110.100:27017/"
+        # host="mongodb://root:root@172.16.110.100:27017/"
     )
 
     for i, split in enumerate(splits):
