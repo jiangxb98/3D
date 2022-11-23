@@ -185,9 +185,10 @@ class LoadImages(object):
         pts_bytes = self.file_client.get(token)
         # not need loader, use mmcv.imfrombytes
         # img = results['img_info']['img_loader'](results, pts_bytes)
-        img = mmcv.imfrombytes(pts_bytes, flag=self.color_type)
-        # or tf.image.decode_jpeg(pts_bytes) both two function have the same size (1280,1920,3)
-        return img        
+        img = mmcv.imfrombytes(pts_bytes, flag=self.color_type, channel_order='rgb')
+        # import tensorflow as tf
+        # tf.image.decode_jpeg(pts_bytes) # both two function have the same size (1280,1920,3) but have tiny distinction
+        return img               
 
     def __call__(self, results):
         results['filename'] = []
