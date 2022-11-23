@@ -324,8 +324,7 @@ class ResizeMultiViewImage:
                 # if results['scale'][i][::-1] == results[key][i].shape, the gt_seg=results[key][i]
                 multi_seg.append(gt_seg)
 
-            # results[key] = np.stack(multi_seg, axis=0)
-            results[key] = multi_seg, axis=0
+            results[key] = multi_seg
 
     def __call__(self, results):
         """Call function to resize images, bounding boxes, masks, semantic
