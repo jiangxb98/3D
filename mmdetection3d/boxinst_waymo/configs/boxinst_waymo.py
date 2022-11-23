@@ -1,7 +1,7 @@
 _base_ = [
-    './_base_/datasets/waymo-image-instance-seg.py',
-    './_base_/schedules/schedule_1x.py',
-    './_base_/default_runtime.py',
+    './waymo-image-instance-seg.py',
+    './schedules/schedule_1x.py',
+    './default_runtime.py',
 ]
 
 # model settings
@@ -54,24 +54,24 @@ model = dict(
         branch_convs=4,
         branch_channels=128,
         branch_out_channels=16),
-    mask_head=dict(
-        type='CondInstMaskHead',
-        in_channels=16,
-        in_stride=8,
-        out_stride=4,
-        dynamic_convs=3,
-        dynamic_channels=8,
-        disable_rel_coors=False,
-        bbox_head_channels=256,
-        sizes_of_interest=[64, 128, 256, 512, 1024],
-        max_proposals=-1,
-        topk_per_img=64,
-        boxinst_enabled=True,
-        bottom_pixels_removed=10,
-        pairwise_size=3,
-        pairwise_dilation=2,
-        pairwise_color_thresh=0.3,
-        pairwise_warmup=10000),
+    # mask_head=dict(
+    #     type='CondInstMaskHead',
+    #     in_channels=16,
+    #     in_stride=8,
+    #     out_stride=4,
+    #     dynamic_convs=3,
+    #     dynamic_channels=8,
+    #     disable_rel_coors=False,
+    #     bbox_head_channels=256,
+    #     sizes_of_interest=[64, 128, 256, 512, 1024],
+    #     max_proposals=-1,
+    #     topk_per_img=64,
+    #     boxinst_enabled=True,
+    #     bottom_pixels_removed=10,
+    #     pairwise_size=3,
+    #     pairwise_dilation=2,
+    #     pairwise_color_thresh=0.3,
+    #     pairwise_warmup=10000),
     # training and testing settings
     train_cfg=dict(
         assigner=dict(
