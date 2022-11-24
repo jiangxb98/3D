@@ -371,8 +371,10 @@ class SampleFrameImage:
         results['img'] = results['img'][sample_image_id]
         results['gt_labels'] = results['gt_labels'][sample_image_id]
         results['gt_bboxes'] = results['gt_bboxes'][sample_image_id]
-        results['gt_masks'] = results['gt_masks'][sample_image_id]
-        results['gt_semantic_seg'] = results['gt_semantic_seg'][sample_image_id]
+        if 'gt_masks' in results.keys():
+            results['gt_masks'] = results['gt_masks'][sample_image_id]
+        if 'gt_semantic_seg' in results.keys():
+            results['gt_semantic_seg'] = results['gt_semantic_seg'][sample_image_id]
         results.update(dict(img_sample='random'))
         return results
         

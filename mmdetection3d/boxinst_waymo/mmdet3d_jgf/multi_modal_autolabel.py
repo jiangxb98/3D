@@ -22,23 +22,30 @@ class MultiModalAutoLabel(Base3DDetector):
     """Base class of Multi-modality autolabel."""
 
     def __init__(self,
-                 pts_voxel_layer=None,
-                 pts_voxel_encoder=None,
-                 pts_middle_encoder=None,
-                 pts_fusion_layer=None,
-                 img_backbone=None,
-                 pts_backbone=None,
-                 img_neck=None,
-                 pts_neck=None,
-                 pts_bbox_head=None,
-                 img_roi_head=None,
-                 img_rpn_head=None,
-                 train_cfg=None,
-                 test_cfg=None,
-                 pretrained=None,
-                 init_cfg=None):
+                pts_voxel_layer=None,
+                pts_voxel_encoder=None,
+                pts_middle_encoder=None,
+                pts_seg_head = None,
+
+                img_backbone=None,  # 
+                img_neck=None,  #
+                img_bbox_head=None,
+                img_mask_branch=None,
+                img_mask_head=None,
+
+                pts_fusion_layer=None,
+                pts_backbone=None,
+                pts_neck=None,
+                pts_bbox_head=None,
+                img_roi_head=None,
+                img_rpn_head=None,
+                train_cfg=None,
+                test_cfg=None,
+                pretrained=None,
+                init_cfg=None):
         super(MultiModalAutoLabel, self).__init__(init_cfg=init_cfg)
 
+        # Cylinder
         if pts_voxel_layer:
             self.pts_voxel_layer = Voxelization(**pts_voxel_layer)
         if pts_voxel_encoder:
@@ -47,32 +54,24 @@ class MultiModalAutoLabel(Base3DDetector):
         if pts_middle_encoder:
             self.pts_middle_encoder = builder.build_middle_encoder(
                 pts_middle_encoder)
-        if pts_backbone:
-            self.pts_backbone = builder.build_backbone(pts_backbone)
-        if pts_fusion_layer:
-            self.pts_fusion_layer = builder.build_fusion_layer(
-                pts_fusion_layer)
-        if pts_neck is not None:
-            self.pts_neck = builder.build_neck(pts_neck)
-        if pts_bbox_head:
-            pts_train_cfg = train_cfg.pts if train_cfg else None
-            pts_bbox_head.update(train_cfg=pts_train_cfg)
-            pts_test_cfg = test_cfg.pts if test_cfg else None
-            pts_bbox_head.update(test_cfg=pts_test_cfg)
-            self.pts_bbox_head = builder.build_head(pts_bbox_head)
-
+        if pts_seg_head is not None:
+            self.pts_seg_head = builder.build_head(pts_seg_head)
+        # BoxInst
         if img_backbone:
             self.img_backbone = builder.build_backbone(img_backbone)
         if img_neck is not None:
             self.img_neck = builder.build_neck(img_neck)
-        if img_rpn_head is not None:
-            self.img_rpn_head = builder.build_head(img_rpn_head)
-        if img_roi_head is not None:
-            self.img_roi_head = builder.build_head(img_roi_head)
+        if img_bbox_head is not None:
+            self.img_bbox_head = builder.build_head(img_bbox_head)
+        if img_mask_branch is not None:
+            self.img_mask_branch = builder.build_head(img_mask_branch)
+        if img_mask_head is not None:
+            self.img_mask_head = builder.build_head(img_mask_head)           
 
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
-
+        
+        # If use Pretrained Module
         if pretrained is None:
             img_pretrained = None
             pts_pretrained = None
@@ -82,18 +81,12 @@ class MultiModalAutoLabel(Base3DDetector):
         else:
             raise ValueError(
                 f'pretrained should be a dict, got {type(pretrained)}')
-
+        # Init the module    
         if self.with_img_backbone:
             if img_pretrained is not None:
                 warnings.warn('DeprecationWarning: pretrained is a deprecated '
                               'key, please consider using init_cfg.')
                 self.img_backbone.init_cfg = dict(
-                    type='Pretrained', checkpoint=img_pretrained)
-        if self.with_img_roi_head:
-            if img_pretrained is not None:
-                warnings.warn('DeprecationWarning: pretrained is a deprecated '
-                              'key, please consider using init_cfg.')
-                self.img_roi_head.init_cfg = dict(
                     type='Pretrained', checkpoint=img_pretrained)
         if self.with_pts_backbone:
             if pts_pretrained is not None:
@@ -105,20 +98,17 @@ class MultiModalAutoLabel(Base3DDetector):
     @property
     def with_img_shared_head(self):
         """bool: Whether the detector has a shared head in image branch."""
-        return hasattr(self,
-                       'img_shared_head') and self.img_shared_head is not None
+        return hasattr(self, 'img_shared_head') and self.img_shared_head is not None
 
     @property
     def with_pts_bbox(self):
         """bool: Whether the detector has a 3D box head."""
-        return hasattr(self,
-                       'pts_bbox_head') and self.pts_bbox_head is not None
+        return hasattr(self, 'pts_bbox_head') and self.pts_bbox_head is not None
 
     @property
     def with_img_bbox(self):
         """bool: Whether the detector has a 2D image box head."""
-        return hasattr(self,
-                       'img_bbox_head') and self.img_bbox_head is not None
+        return hasattr(self, 'img_bbox_head') and self.img_bbox_head is not None
 
     @property
     def with_img_backbone(self):
@@ -133,8 +123,7 @@ class MultiModalAutoLabel(Base3DDetector):
     @property
     def with_fusion(self):
         """bool: Whether the detector has a fusion layer."""
-        return hasattr(self,
-                       'pts_fusion_layer') and self.fusion_layer is not None
+        return hasattr(self, 'pts_fusion_layer') and self.fusion_layer is not None
 
     @property
     def with_img_neck(self):
@@ -159,15 +148,22 @@ class MultiModalAutoLabel(Base3DDetector):
     @property
     def with_voxel_encoder(self):
         """bool: Whether the detector has a voxel encoder."""
-        return hasattr(self,
-                       'voxel_encoder') and self.voxel_encoder is not None
+        return hasattr(self, 'voxel_encoder') and self.voxel_encoder is not None
 
     @property
     def with_middle_encoder(self):
         """bool: Whether the detector has a middle encoder."""
-        return hasattr(self,
-                       'middle_encoder') and self.middle_encoder is not None
+        return hasattr(self, 'middle_encoder') and self.middle_encoder is not None
 
+    @property
+    def with_pts_seg_head(self):
+        return hasattr(self, 'pts_seg_head') and self.pts_seg_head is not None
+
+    @property
+    def with_middle_encoder(self):
+        """bool: Whether the detector has a middle encoder."""
+        return hasattr(self, 'middle_encoder') and self.middle_encoder is not None
+        
     def extract_img_feat(self, img, img_metas):
         """Extract features of images."""
         if self.with_img_backbone and img is not None:
@@ -190,6 +186,9 @@ class MultiModalAutoLabel(Base3DDetector):
 
     def extract_pts_feat(self, pts, img_feats, img_metas):
         """Extract features of points."""
+        # If no points backbone return None
+        if not self.with_pts_backbone:
+            return None
         if not self.with_pts_bbox:
             return None
         voxels, num_points, coors = self.voxelize(pts)
@@ -236,13 +235,14 @@ class MultiModalAutoLabel(Base3DDetector):
         return voxels, num_points, coors_batch
 
     def forward_train(self,
-                      points=None,
-                      img_metas=None,
+                      points=None,  # need
+                      img_metas=None,  # need
                       gt_bboxes_3d=None,
                       gt_labels_3d=None,
-                      gt_labels=None,
-                      gt_bboxes=None,
-                      img=None,
+                      gt_labels=None,  # need
+                      gt_bboxes=None,  # need
+                      gt_masks=None,
+                      img=None, # need
                       proposals=None,
                       gt_bboxes_ignore=None):
         """Forward training function.
@@ -270,8 +270,7 @@ class MultiModalAutoLabel(Base3DDetector):
         Returns:
             dict: Losses of different branches.
         """
-        img_feats, pts_feats = self.extract_feat(
-            points, img=img, img_metas=img_metas)
+        img_feats, pts_feats = self.extract_feat(points, img=img, img_metas=img_metas)
         losses = dict()
         if pts_feats:
             losses_pts = self.forward_pts_train(pts_feats, gt_bboxes_3d,
@@ -281,20 +280,22 @@ class MultiModalAutoLabel(Base3DDetector):
         if img_feats:
             losses_img = self.forward_img_train(
                 img_feats,
+                points=points,
                 img_metas=img_metas,
                 gt_bboxes=gt_bboxes,
                 gt_labels=gt_labels,
                 gt_bboxes_ignore=gt_bboxes_ignore,
+                gt_masks=gt_masks,
                 proposals=proposals)
             losses.update(losses_img)
         return losses
 
     def forward_pts_train(self,
-                          pts_feats,
-                          gt_bboxes_3d,
-                          gt_labels_3d,
-                          img_metas,
-                          gt_bboxes_ignore=None):
+                        pts_feats,
+                        gt_bboxes_3d,
+                        gt_labels_3d,
+                        img_metas,
+                        gt_bboxes_ignore=None):
         """Forward function for point cloud branch.
 
         Args:
@@ -317,13 +318,16 @@ class MultiModalAutoLabel(Base3DDetector):
         return losses
 
     def forward_img_train(self,
-                          x,
-                          img_metas,
-                          gt_bboxes,
-                          gt_labels,
-                          gt_bboxes_ignore=None,
-                          proposals=None,
-                          **kwargs):
+                        img,
+                        x,
+                        points,
+                        img_metas,
+                        gt_bboxes,
+                        gt_labels,
+                        gt_bboxes_ignore=None,
+                        gt_masks=None,
+                        proposals=None,
+                        **kwargs):
         """Forward function for image branch.
 
         This function works similar to the forward function of Faster R-CNN.
@@ -331,43 +335,48 @@ class MultiModalAutoLabel(Base3DDetector):
         Args:
             x (list[torch.Tensor]): Image features of shape (B, C, H, W)
                 of multiple levels.
+            points:
             img_metas (list[dict]): Meta information of images.
             gt_bboxes (list[torch.Tensor]): Ground truth boxes of each image
                 sample.
             gt_labels (list[torch.Tensor]): Ground truth labels of boxes.
             gt_bboxes_ignore (list[torch.Tensor], optional): Ground truth
                 boxes to be ignored. Defaults to None.
+            gt_masks ()
             proposals (list[torch.Tensor], optional): Proposals of each sample.
                 Defaults to None.
 
         Returns:
             dict: Losses of each branch.
         """
-        losses = dict()
-        # RPN forward and loss
-        if self.with_img_rpn:
-            rpn_outs = self.img_rpn_head(x)
-            rpn_loss_inputs = rpn_outs + (gt_bboxes, img_metas,
-                                          self.train_cfg.img_rpn)
-            rpn_losses = self.img_rpn_head.loss(
-                *rpn_loss_inputs, gt_bboxes_ignore=gt_bboxes_ignore)
-            losses.update(rpn_losses)
+        if gt_masks is not None:
+            H, W = img.size(2), img.size(3)
+            tensor_masks = []
+            for masks in gt_masks:
+                masks = masks.expand(H, W, 0, 0)
+                tensor_masks.append(
+                    masks.to_tensor(dtype=torch.uint8, device=img.device))
+            gt_masks = tensor_masks
 
-            proposal_cfg = self.train_cfg.get('img_rpn_proposal',
-                                              self.test_cfg.img_rpn)
-            proposal_inputs = rpn_outs + (img_metas, proposal_cfg)
-            proposal_list = self.img_rpn_head.get_bboxes(*proposal_inputs)
-        else:
-            proposal_list = proposals
+        cls_score, bbox_pred, centerness, param_pred = \
+                self.img_bbox_head(x, self.img_mask_head.param_conv)
+        img_bbox_head_loss_inputs = (cls_score, bbox_pred, centerness) + (
+            gt_bboxes, gt_labels, img_metas)
+        losses, coors, level_inds, img_inds, gt_inds = self.img_bbox_head.loss(
+            *img_bbox_head_loss_inputs, gt_bboxes_ignore=gt_bboxes_ignore)
 
-        # bbox head forward and loss
-        if self.with_img_bbox:
-            # bbox head forward and loss
-            img_roi_losses = self.img_roi_head.forward_train(
-                x, img_metas, proposal_list, gt_bboxes, gt_labels,
-                gt_bboxes_ignore, **kwargs)
-            losses.update(img_roi_losses)
+        mask_feat = self.img_mask_branch(x)
+        if self.segm_head is not None:
+            segm_pred = self.segm_head(x[0])
+            loss_segm = self.segm_head.loss(segm_pred, gt_masks, gt_labels)
+            losses.update(loss_segm)
 
+        inputs = (cls_score, centerness, param_pred, coors, level_inds, img_inds, gt_inds)
+        param_pred, coors, level_inds, img_inds, gt_inds = self.img_mask_head.training_sample(*inputs)
+        mask_pred = self.img_mask_head(mask_feat, param_pred, coors, level_inds, img_inds)
+        loss_mask = self.img_mask_head.loss(img, img_metas, mask_pred, gt_inds, gt_bboxes,
+                                        gt_masks, gt_labels)
+        losses.update(loss_mask)
         return losses
 
     def simple_test_img(self, x, img_metas, proposals=None, rescale=False):

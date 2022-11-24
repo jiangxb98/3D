@@ -1,12 +1,12 @@
 _base_ = [
     './waymo-image-instance-seg.py',
-    './schedules/schedule_1x.py',
+    './schedule_1x.py',
     './default_runtime.py',
 ]
 
 # model settings
 model = dict(
-    type='CondInst',
+    type='MultiModalAutoLabel',
     backbone=dict(
         type='ResNet',
         depth=50,
