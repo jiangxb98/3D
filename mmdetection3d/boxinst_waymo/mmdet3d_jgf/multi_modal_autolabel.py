@@ -32,6 +32,8 @@ class MultiModalAutoLabel(Base3DDetector):
                 img_bbox_head=None,
                 img_mask_branch=None,
                 img_mask_head=None,
+                img_segm_head= None,
+                pretrained=None,
 
                 pts_fusion_layer=None,
                 pts_backbone=None,
@@ -41,7 +43,6 @@ class MultiModalAutoLabel(Base3DDetector):
                 img_rpn_head=None,
                 train_cfg=None,
                 test_cfg=None,
-                pretrained=None,
                 init_cfg=None):
         super(MultiModalAutoLabel, self).__init__(init_cfg=init_cfg)
 
@@ -67,7 +68,10 @@ class MultiModalAutoLabel(Base3DDetector):
             self.img_mask_branch = builder.build_head(img_mask_branch)
         if img_mask_head is not None:
             self.img_mask_head = builder.build_head(img_mask_head)           
-
+        if img_segm_head is not None:
+            self.img_segm_head = builder.build_head(img_segm_head)
+        else:
+            self.img_segm_head = None
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
         
@@ -163,6 +167,10 @@ class MultiModalAutoLabel(Base3DDetector):
     def with_middle_encoder(self):
         """bool: Whether the detector has a middle encoder."""
         return hasattr(self, 'middle_encoder') and self.middle_encoder is not None
+
+    @property
+    def with_img_mask_head(self):
+        return hasattr(self, 'img_mask_head') and self.img_mask_head is not None    
         
     def extract_img_feat(self, img, img_metas):
         """Extract features of images."""
@@ -279,6 +287,7 @@ class MultiModalAutoLabel(Base3DDetector):
             losses.update(losses_pts)
         if img_feats:
             losses_img = self.forward_img_train(
+                img,
                 img_feats,
                 points=points,
                 img_metas=img_metas,
@@ -366,9 +375,9 @@ class MultiModalAutoLabel(Base3DDetector):
             *img_bbox_head_loss_inputs, gt_bboxes_ignore=gt_bboxes_ignore)
 
         mask_feat = self.img_mask_branch(x)
-        if self.segm_head is not None:
-            segm_pred = self.segm_head(x[0])
-            loss_segm = self.segm_head.loss(segm_pred, gt_masks, gt_labels)
+        if self.img_segm_head is not None:
+            segm_pred = self.img_segm_head(x[0])
+            loss_segm = self.img_segm_head.loss(segm_pred, gt_masks, gt_labels)
             losses.update(loss_segm)
 
         inputs = (cls_score, centerness, param_pred, coors, level_inds, img_inds, gt_inds)

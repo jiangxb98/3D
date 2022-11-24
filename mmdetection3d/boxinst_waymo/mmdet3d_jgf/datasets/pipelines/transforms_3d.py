@@ -153,6 +153,7 @@ class PadMultiViewImage:
                         results[key][i], self.size_divisor, pad_val=pad_val)
                 results[key][i] = padded_img
         results['pad_shape'] = [padded_img.shape for padded_img in results[key]]
+        results['img_shape'] = results['pad_shape']
         results['pad_fixed_size'] = self.size
         results['pad_size_divisor'] = self.size_divisor
 

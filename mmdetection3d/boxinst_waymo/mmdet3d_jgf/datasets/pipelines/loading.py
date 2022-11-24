@@ -369,6 +369,11 @@ class SampleFrameImage:
             results['sample_img_id'] = sample_image_id
         
         results['img'] = results['img'][sample_image_id]
+        results['img_shape'] = results['img_shape'][sample_image_id]
+        results['ori_shape'] = results['ori_shape'][sample_image_id]
+        results['pad_shape'] = results['pad_shape'][sample_image_id]
+        results['lidar2img'] = results['lidar2img'][sample_image_id]
+        results['pad_fixed_size'] = results['pad_fixed_size'][sample_image_id]
         results['gt_labels'] = results['gt_labels'][sample_image_id]
         results['gt_bboxes'] = results['gt_bboxes'][sample_image_id]
         if 'gt_masks' in results.keys():
