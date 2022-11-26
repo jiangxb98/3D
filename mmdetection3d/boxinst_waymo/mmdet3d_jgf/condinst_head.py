@@ -1312,7 +1312,7 @@ class CondInstMaskHead(BaseModule):
             # 2. pairwise loss
             # all pixels log, [64,8,320,480]
             pairwise_losses = pairwise_nlog(mask_logits, self.pairwise_size, self.pairwise_dilation)
-            # > color sim threshold points and in gt_boxes points intersection
+            # (> color sim threshold points and in gt_boxes points) intersection
             # weights, [64,8,320,480]
             weights = (img_color_similarity >= self.pairwise_color_thresh).float() * gt_bitmasks.float()
 
@@ -1397,11 +1397,11 @@ class CondInstMaskHead(BaseModule):
         for i, per_img_gt_bboxes in enumerate(gt_bboxes):
             image_lab = color.rgb2lab(downsampled_images[i].byte().permute(1, 2, 0).cpu().numpy())
             image_lab = torch.as_tensor(image_lab, device=padded_image_masks.device, dtype=torch.float32)
-            image_lab = image_lab.permute(2, 0, 1)[None]
+            image_lab = image_lab.permute(2, 0, 1)[None]  # [1,3,320,480]
             image_color_similarity = get_image_color_similarity(
                 image_lab, downsampled_image_masks[i],
                 self.pairwise_size, self.pairwise_dilation
-            )
+            )  # [1,8,320,480]
 
             per_im_bitmasks = []
             per_im_bitmasks_full = []
@@ -1409,7 +1409,7 @@ class CondInstMaskHead(BaseModule):
             for per_box in per_img_gt_bboxes:  # [x1,y1, x2, y2]
                 bitmask_full = torch.zeros((h, w), device=per_box.device).float()
                 bitmask_full[int(per_box[1]): int(per_box[3]) + 1, int(per_box[0]):int(per_box[2]) + 1] = 1.0
-
+                # downsample
                 bitmask = bitmask_full[start::stride, start::stride]
 
                 assert bitmask.size(0) * stride == h

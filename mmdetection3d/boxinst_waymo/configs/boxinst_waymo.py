@@ -68,7 +68,7 @@ model = dict(
         topk_per_img=64,  # 每张图片最多采样64个实例
         boxinst_enabled=True,
         bottom_pixels_removed=10,
-        pairwise_size=3,
+        pairwise_size=3,  # 3*3大小 9-1=8
         pairwise_dilation=2,
         pairwise_color_thresh=0.3,
         pairwise_warmup=10000),
