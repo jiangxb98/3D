@@ -371,11 +371,11 @@ class MultiModalAutoLabel(Base3DDetector):
             loss_segm = self.img_segm_head.loss(segm_pred, gt_masks, gt_labels)
             losses.update(loss_segm)
 
-        inputs = (cls_score, centerness, param_pred, coors, level_inds, img_inds, gt_inds, points)
-        param_pred, coors, level_inds, img_inds, gt_inds = self.img_mask_head.training_sample(*inputs)  # each image predict a maximum of 64 instance
-        mask_pred = self.img_mask_head(mask_feat, param_pred, coors, level_inds, img_inds)
+        inputs = (cls_score, centerness, param_pred, coors, level_inds, img_inds, gt_inds)
+        param_pred, coors, level_inds, img_inds, gt_inds = self.img_mask_head.training_sample(*inputs)  # each image predict a maximum of 64 instance object
+        mask_pred = self.img_mask_head(mask_feat, param_pred, coors, level_inds, img_inds)  # 64x1x2hx2w
         loss_mask = self.img_mask_head.loss(img, img_metas, mask_pred, gt_inds, gt_bboxes,
-                                        gt_masks, gt_labels)
+                                        gt_masks, gt_labels, points)
         losses.update(loss_mask)
         return losses
 

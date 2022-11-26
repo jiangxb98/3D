@@ -1155,7 +1155,7 @@ class CondInstMaskHead(BaseModule):
             if i < self.dynamic_convs - 1:
                 x = F.relu(x)
         x = x.permute(1, 0, 2, 3)
-        x = aligned_bilinear(x, self.in_stride // self.out_stride)
+        x = aligned_bilinear(x, self.in_stride // self.out_stride)  # 64x1xhxw --> 64x1x2hx2w
         return x
 
     def training_sample(self,
@@ -1281,16 +1281,18 @@ class CondInstMaskHead(BaseModule):
     def loss(self,
              imgs,
              img_metas,
-             mask_logits,
-             gt_inds,
-             gt_bboxes,
+             mask_logits,  # pred mask 64 x 1 x 2fpn_h x 2fpn_w
+             gt_inds,  # 64,1
+             gt_bboxes,# gt_bboxes_nums, 4
              gt_masks,
-             gt_labels):
+             gt_labels,
+             points):
         self._iter += 1
+        #similarities matrix, gt_bitmasks
         similarities, gt_bitmasks, bitmasks_full = self.get_targets(gt_bboxes, gt_masks, imgs, img_metas)
         mask_scores = mask_logits.sigmoid()
         gt_bitmasks = torch.cat(gt_bitmasks, dim=0)
-        gt_bitmasks = gt_bitmasks[gt_inds].unsqueeze(1).to(mask_scores.dtype)
+        gt_bitmasks = gt_bitmasks[gt_inds].unsqueeze(1).to(mask_scores.dtype)  # (64,1,1280/8x2,1920/8x2)
 
         losses = {}
 
@@ -1303,13 +1305,15 @@ class CondInstMaskHead(BaseModule):
                 losses["loss_pairwise"] = dummy_loss
 
         if self.boxinst_enabled:
-            img_color_similarity = torch.cat(similarities, dim=0)
-            img_color_similarity = img_color_similarity[gt_inds].to(dtype=mask_scores.dtype)
-
+            img_color_similarity = torch.cat(similarities, dim=0)  # [(14,8,320,480),(N_gt,8,320,480)]
+            img_color_similarity = img_color_similarity[gt_inds].to(dtype=mask_scores.dtype)  # [64,8,320,480]
+            # 1. projection loss
             loss_prj_term = compute_project_term(mask_scores, gt_bitmasks)
-
+            # 2. pairwise loss
+            # all pixels log, [64,8,320,480]
             pairwise_losses = pairwise_nlog(mask_logits, self.pairwise_size, self.pairwise_dilation)
-
+            # > color sim threshold points and in gt_boxes points intersection
+            # weights, [64,8,320,480]
             weights = (img_color_similarity >= self.pairwise_color_thresh).float() * gt_bitmasks.float()
 
             loss_pairwise = (pairwise_losses * weights).sum() / weights.sum().clamp(min=1.0)
@@ -1321,6 +1325,7 @@ class CondInstMaskHead(BaseModule):
                 "loss_prj": loss_prj_term,
                 "loss_pairwise": loss_pairwise,
             })
+        # if use real gt_mask
         else:
             mask_losses = dice_coefficient(mask_scores, gt_bitmasks)
             loss_mask = mask_losses.mean()
