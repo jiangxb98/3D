@@ -255,7 +255,7 @@ class CondInstBoxHead(AnchorFreeHead):
                  num_classes,
                  in_channels,
                  regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512),
-                                 (512, INF)),
+                                 (512, INF)),  # 是FPN中每个特征图对应的回归范围，较大的特征图检测小目标，较小的特征图检测大目标，这个范围是bboxe的大小
                  center_sampling=True,
                  center_sample_radius=1.5,
                  norm_on_bbox=True,
@@ -397,7 +397,7 @@ class CondInstBoxHead(AnchorFreeHead):
         assert len(cls_scores) == len(bbox_preds) == len(centernesses)
         featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
         all_level_points = self.prior_generator.grid_priors(
-            featmap_sizes, bbox_preds[0].dtype, bbox_preds[0].device)
+            featmap_sizes, bbox_preds[0].dtype, bbox_preds[0].device)  # image pixel cooresponding to feature map
         labels, bbox_targets, gt_inds = \
             self.get_targets(all_level_points, gt_bboxes, gt_labels)
 
@@ -425,8 +425,8 @@ class CondInstBoxHead(AnchorFreeHead):
             [points.repeat(num_imgs, 1) for points in all_level_points])
 
         flatten_gt_inds = torch.cat(gt_inds)
-        flatten_img_inds = []
-        flatten_level_inds = []
+        flatten_img_inds = []  # image index
+        flatten_level_inds = []  # fpn level index
         for i, featmap_size in enumerate(featmap_sizes):
             H, W = featmap_size
             img_inds = torch.arange(num_imgs, device=bbox_preds[0].device)
@@ -437,16 +437,16 @@ class CondInstBoxHead(AnchorFreeHead):
         flatten_level_inds = torch.cat(flatten_level_inds)
 
         # FG cat_id: [0, num_classes -1], BG cat_id: num_classes
-        bg_class_ind = self.num_classes
+        bg_class_ind = self.num_classes  # bg_class是background
         pos_inds = ((flatten_labels >= 0)
-                    & (flatten_labels < bg_class_ind)).nonzero().reshape(-1)
+                    & (flatten_labels < bg_class_ind)).nonzero().reshape(-1)  # pos_inds pos sample index
         num_pos = torch.tensor(
             len(pos_inds), dtype=torch.float, device=bbox_preds[0].device)
         num_pos = max(reduce_mean(num_pos), 1.0)
         loss_cls = self.loss_cls(
-            flatten_cls_scores, flatten_labels, avg_factor=num_pos)
+            flatten_cls_scores, flatten_labels, avg_factor=num_pos)# 51150,51150(each level has label[0,1,2,3]),123
 
-        pos_bbox_preds = flatten_bbox_preds[pos_inds]
+        pos_bbox_preds = flatten_bbox_preds[pos_inds]  # only cal pos gt loss
         pos_centerness = flatten_centerness[pos_inds]
         pos_bbox_targets = flatten_bbox_targets[pos_inds]
         pos_centerness_targets = self.centerness_target(pos_bbox_targets)
@@ -509,7 +509,7 @@ class CondInstBoxHead(AnchorFreeHead):
         # the number of points per img, per lvl
         num_points = [center.size(0) for center in points]
 
-        # get labels and bbox_targets of each image
+        # get labels and bbox_targets of each image.
         labels_list, bbox_targets_list, gt_inds_list = multi_apply(
             self._get_target_single,
             gt_bboxes_list,
@@ -1133,20 +1133,20 @@ class CondInstMaskHead(BaseModule):
         return weights_list, biases_list
 
     def forward(self, feat, params, coors, level_inds, img_inds):
-        mask_feat = feat[img_inds]
+        mask_feat = feat[img_inds]  # [1,16,160,240]-->[56,16,160,240]
         N, _, H, W = mask_feat.size()
         if not self.disable_rel_coors:
             shift_x = torch.arange(0, W * self.in_stride, step=self.in_stride,
                                    dtype=mask_feat.dtype, device=mask_feat.device)
             shift_y = torch.arange(0, H * self.in_stride, step=self.in_stride,
                                    dtype=mask_feat.dtype, device=mask_feat.device)
-            shift_y, shift_x = torch.meshgrid(shift_y, shift_x)
+            shift_y, shift_x = torch.meshgrid(shift_y, shift_x)  # 生成单元网格
             locations = torch.stack([shift_x, shift_y], dim=0) + self.in_stride // 2
 
             rel_coors = coors[..., None, None] - locations[None]
             soi = self.sizes_of_interest.float()[level_inds]
             rel_coors = rel_coors / soi[..., None, None, None]
-            mask_feat = torch.cat([rel_coors, mask_feat], dim=1)
+            mask_feat = torch.cat([rel_coors, mask_feat], dim=1)  # [56,18,160,240]
 
         weights, biases = self.parse_dynamic_params(params)
         x = mask_feat.reshape(1, -1, H, W)
@@ -1161,7 +1161,7 @@ class CondInstMaskHead(BaseModule):
     def training_sample(self,
                         cls_scores,
                         centernesses,
-                        param_preds,
+                        param_preds,  # [1, 233, 160, 240]
                         coors,
                         level_inds,
                         img_inds,
@@ -1170,7 +1170,7 @@ class CondInstMaskHead(BaseModule):
         param_preds = torch.cat([
             param_pred.permute(0, 2, 3, 1).flatten(end_dim=2)
             for param_pred in param_preds], dim=0)
-
+        # get in gt boxes pixel 
         pos_mask = gt_inds != -1
         param_preds = param_preds[pos_mask]
         coors = coors[pos_mask]
@@ -1193,25 +1193,25 @@ class CondInstMaskHead(BaseModule):
             centerness = centerness[pos_mask]
 
             sampled_inds = []
-            inst_inds = torch.arange(param_preds.size(0), device=param_preds.device)
+            inst_inds = torch.arange(param_preds.size(0), device=param_preds.device)  # 预测的实例id,因为有123个grid points在gt内
             for img_id in range(num_imgs):
                 img_mask = img_inds == img_id
                 if not img_mask.any():
                     continue
-                img_gt_inds = gt_inds[img_mask]
-                img_inst_inds = inst_inds[img_mask]
-                unique_gt_inds = img_gt_inds.unique()
-                inst_per_gt = max(int(self.topk_per_img / unique_gt_inds.size(0)), 1)
+                img_gt_inds = gt_inds[img_mask]  # global gt instance id 
+                img_inst_inds = inst_inds[img_mask]  # this image instance mask
+                unique_gt_inds = img_gt_inds.unique()  # gt instance id, 14
+                inst_per_gt = max(int(self.topk_per_img / unique_gt_inds.size(0)), 1)  # a gt has fixed max inst nums
 
                 for gt_ind in unique_gt_inds:
-                    gt_mask = img_gt_inds == gt_ind
-                    img_gt_inst_inds = img_inst_inds[gt_mask]
+                    gt_mask = img_gt_inds == gt_ind  # get instance=gt_ind's mask
+                    img_gt_inst_inds = img_inst_inds[gt_mask]  # image instance id(local instance id)
                     if img_gt_inst_inds.size(0) > inst_per_gt:
                         cls_scores_ = cls_scores[img_mask][gt_mask]
                         cls_scores_ = cls_scores_.sigmoid().max(dim=1)[0]
                         centerness_ = centerness[img_mask][gt_mask]
                         centerness_ = centerness_.sigmoid()
-                        inds = (cls_scores_ * centerness_).topk(inst_per_gt, dim=0)[1]
+                        inds = (cls_scores_ * centerness_).topk(inst_per_gt, dim=0)[1]  # get the 4 highest scores indices
                         img_gt_inst_inds = img_gt_inst_inds[inds]
                     sampled_inds.append(img_gt_inst_inds)
             sampled_inds = torch.cat(sampled_inds, dim=0)

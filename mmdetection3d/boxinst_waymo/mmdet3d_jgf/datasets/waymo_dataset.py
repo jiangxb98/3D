@@ -68,10 +68,13 @@ class WaymoDataset(Custom3DDataset):
         # 这个是load所有的语义标签在OSS上的路径
         if self.load_semseg:  # 23692
             self.semseg_frame_infos = self.read_semseg_infos(self.semseg_info_path, filter_sem='semseg_info')
+            # intersection
+            self.data_infos = list(set(self.data_infos).intersection(self.semseg_frame_infos))
         # train len(self.panseg_frame_infos)=12296
         if self.load_panseg:
             self.panseg_frame_infos = self.read_semseg_infos(self.panseg_info_path, filter_sem='panseg_info')
-        
+            # intersection
+            self.data_infos = list(set(self.data_infos).intersection(self.panseg_frame_infos))
         # process pipeline
         if pipeline is not None:
             self.pipeline = Compose(pipeline)
@@ -102,8 +105,6 @@ class WaymoDataset(Custom3DDataset):
     def get_data_info(self, index):
         if self.infos_reader is None:
             self.infos_reader = mmcv.FileClient(**self.datainfo_client_args)
-        # test index=79
-        index = 79
         info = self.infos_reader.get((self.info_path, self.data_infos[index]))  # 进入mongodb.py改写的get方法 get a frame info
         sample_idx = info['sample_idx']
 

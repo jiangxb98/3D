@@ -358,30 +358,21 @@ class MultiModalAutoLabel(Base3DDetector):
         Returns:
             dict: Losses of each branch.
         """
-        if gt_masks is not None:
-            H, W = img.size(2), img.size(3)
-            tensor_masks = []
-            for masks in gt_masks:
-                masks = masks.expand(H, W, 0, 0)
-                tensor_masks.append(
-                    masks.to_tensor(dtype=torch.uint8, device=img.device))
-            gt_masks = tensor_masks
-
         cls_score, bbox_pred, centerness, param_pred = \
                 self.img_bbox_head(x, self.img_mask_head.param_conv)
         img_bbox_head_loss_inputs = (cls_score, bbox_pred, centerness) + (
             gt_bboxes, gt_labels, img_metas)
         losses, coors, level_inds, img_inds, gt_inds = self.img_bbox_head.loss(
             *img_bbox_head_loss_inputs, gt_bboxes_ignore=gt_bboxes_ignore)
-
-        mask_feat = self.img_mask_branch(x)
+        
+        mask_feat = self.img_mask_branch(x)  # 1x16xHxW
         if self.img_segm_head is not None:
             segm_pred = self.img_segm_head(x[0])
             loss_segm = self.img_segm_head.loss(segm_pred, gt_masks, gt_labels)
             losses.update(loss_segm)
 
-        inputs = (cls_score, centerness, param_pred, coors, level_inds, img_inds, gt_inds)
-        param_pred, coors, level_inds, img_inds, gt_inds = self.img_mask_head.training_sample(*inputs)
+        inputs = (cls_score, centerness, param_pred, coors, level_inds, img_inds, gt_inds, points)
+        param_pred, coors, level_inds, img_inds, gt_inds = self.img_mask_head.training_sample(*inputs)  # each image predict a maximum of 64 instance
         mask_pred = self.img_mask_head(mask_feat, param_pred, coors, level_inds, img_inds)
         loss_mask = self.img_mask_head.loss(img, img_metas, mask_pred, gt_inds, gt_bboxes,
                                         gt_masks, gt_labels)
