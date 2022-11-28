@@ -66,11 +66,11 @@ class WaymoDataset(Custom3DDataset):
         # 这个是所有在training/infos的数据(每帧点云)索引，如果用语义信息，就建议用语义的索引覆盖掉
         self.data_infos = self.load_annotations(self.info_path)
         # 这个是load所有的语义标签在OSS上的路径
-        if self.load_semseg:  # 23692
+        if self.load_semseg:  # 23691
             self.semseg_frame_infos = self.read_semseg_infos(self.semseg_info_path, filter_sem='semseg_info')
             # intersection
             self.data_infos = list(set(self.data_infos).intersection(self.semseg_frame_infos))
-        # train len(self.panseg_frame_infos)=12296
+        # train len(self.panseg_frame_infos)=12295
         if self.load_panseg:
             self.panseg_frame_infos = self.read_semseg_infos(self.panseg_info_path, filter_sem='panseg_info')
             # intersection

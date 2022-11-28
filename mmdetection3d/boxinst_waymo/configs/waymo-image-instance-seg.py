@@ -140,7 +140,7 @@ data = dict(
         semseg_classes=class_names,
         semseg_info_path='training/infos',
         # 2d segmentation
-        load_panseg=False,  
+        load_panseg=True,
         panseg_classes = class_names,
         panseg_info_path='training/infos',),
     test=dict(
