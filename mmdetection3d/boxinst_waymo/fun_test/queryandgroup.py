@@ -2,6 +2,7 @@ import numpy as np
 from io import BytesIO
 import minio
 import torch
+import mmcv
 
 minio_cfg = dict(
     endpoint='ossapi.cowarobot.cn:9000',
@@ -13,6 +14,18 @@ minio_cfg = dict(
 
 bucket = 'ai-waymo-v1.4'
 object_name = 'training/lidar/0000000'
+img_name = 'training/image/0000000/0'
+
+def read_img_from_minio(bucket, img_name):
+    client = minio.Minio(**minio_cfg)
+    if not client.bucket_exists(bucket):
+        return None
+    pts_bytes = client.get_object(bucket, img_name).read()
+    # not need loader, use mmcv.imfrombytes
+    img = mmcv.imfrombytes(pts_bytes, flag='color', channel_order='rgb')
+    # import tensorflow as tf
+    # tf.image.decode_jpeg(pts_bytes) # both two function have the same size (1280,1920,3) but have tiny distinction
+    return img
 
 def read_points_from_minio(bucket, object_name):
     client = minio.Minio(**minio_cfg)
@@ -37,6 +50,7 @@ def read_points_from_minio(bucket, object_name):
 # x,y,z,intensity,elongation,lidar_idx,cam_idx_0,cam_idx_1,c_0,c_1,r_0,r_1
 # shape=(N,12)
 points = read_points_from_minio(bucket=bucket,object_name=object_name)
+img = read_points_from_minio(bucket=bucket,object_name=img_name)
 
 """
 超参设置：
@@ -135,3 +149,6 @@ print("finish")
 # 7. 对于pairwise loss，我们计算每一对的距离d(1,8,320,480)，然后用exp(d)来做损失
 pairwise_size = 3
 pairwise_dilation = 2
+
+
+# 可视化

@@ -14,7 +14,7 @@ datainfo_client_args = dict(
 class_names = ['Car', 'Pedestrian', 'Cyclist']
 point_cloud_range = [-74.88, -74.88, -2, 74.88, 74.88, 4]
 input_modality = dict(use_lidar=True, use_camera=True)
-# the image is rgb so not convert to rgb, and mean std Exchange dimension
+# the image is rgb so not convert to rgb, and mean std need exchange dimension
 img_norm_cfg = dict(
     mean=[103.53, 116.28, 123.675], std=[57.375, 57.12, 58.395], to_rgb=False)
 

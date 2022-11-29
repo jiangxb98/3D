@@ -6,7 +6,7 @@ from mmcv.cnn import ConvModule, Scale
 from mmcv.runner import BaseModule, force_fp32
 from mmcv.image import tensor2imgs
 from skimage import color
-
+from mmcv.ops.ball_query import ball_query
 from mmdet.core import distance2bbox, multi_apply, reduce_mean
 from mmcv.ops.nms import batched_nms
 from mmdet.models.dense_heads.anchor_free_head import AnchorFreeHead
@@ -247,6 +247,8 @@ def get_image_color_similarity(image, mask, pairwise_size, pairwise_dilation):
 
     return similarity * unfolded_weight
 
+def coumputer_points_loss(points, img_metas, gt_bboxes):
+    pass
 
 @HEADS.register_module()
 class CondInstBoxHead(AnchorFreeHead):
@@ -1056,6 +1058,7 @@ class CondInstMaskHead(BaseModule):
                  pairwise_dilation=2,
                  pairwise_color_thresh=0.3,
                  pairwise_warmup=10000,
+                 points_enabled=False,
                  norm_cfg=dict(
                      type='BN',
                      requires_grad=True),
@@ -1097,7 +1100,7 @@ class CondInstMaskHead(BaseModule):
         self.pairwise_size = pairwise_size
         self.pairwise_dilation = pairwise_dilation
         self.pairwise_color_thresh = pairwise_color_thresh
-
+        self.points_enabled = points_enabled
         self.register_buffer("_iter", torch.zeros([1]))
         self._warmup_iters = pairwise_warmup
 
@@ -1303,7 +1306,10 @@ class CondInstMaskHead(BaseModule):
             else:
                 losses["loss_prj"] = dummy_loss
                 losses["loss_pairwise"] = dummy_loss
-
+        if self.points_enabled:
+            # points loss
+            points_loss = coumputer_points_loss(points, img_metas, gt_bboxes)
+            sample_img_id = img_metas['sample_image_id']
         if self.boxinst_enabled:
             img_color_similarity = torch.cat(similarities, dim=0)  # [(14,8,320,480),(N_gt,8,320,480)]
             img_color_similarity = img_color_similarity[gt_inds].to(dtype=mask_scores.dtype)  # [64,8,320,480]

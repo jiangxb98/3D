@@ -9,6 +9,7 @@ from mmdet3d.datasets.pipelines import RandomFlip3D
 from mmdet.core import BitmapMasks, PolygonMasks
 import warnings
 import mmcv
+from PIL import Image
 @PIPELINES.register_module(force=True)
 class ObjectSample(object):
     def __init__(self, db_sampler, sample_2d=False, use_ground_plane=False):
@@ -147,16 +148,20 @@ class PadMultiViewImage:
                     max_size = max(results[key][i].shape[:2])
                     self.size = (max_size, max_size)
                 if self.size is not None:
+                    # if only pad top del: shape=, add parm: padding=(0,1280-886,0,0)
                     padded_img = mmcv.impad(
                         results[key][i], shape=self.size[i][:2], pad_val=pad_val)
                 elif self.size_divisor is not None:
                     padded_img = mmcv.impad_to_multiple(
                         results[key][i], self.size_divisor, pad_val=pad_val)
+                # Image.fromarray(np.uint8(results[key][i])).save("ori_img_{}.jpeg".format(i))
+                # Image.fromarray(np.uint8(padded_img)).save("pad_img_{}.jpeg".format(i))
                 results[key][i] = padded_img
         results['pad_shape'] = [padded_img.shape for padded_img in results[key]]
         results['img_shape'] = results['pad_shape']
         results['pad_fixed_size'] = self.size
         results['pad_size_divisor'] = self.size_divisor
+
 
     def _pad_masks(self, results):
         """Pad masks according to ``results['pad_shape']``."""
