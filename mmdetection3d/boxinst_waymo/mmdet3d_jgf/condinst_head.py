@@ -180,8 +180,8 @@ def get_original_image(img, img_meta):
     original_shape_img = img[:, :original_shape[0], :original_shape[1]]
     img_norm_cfg = img_meta["img_norm_cfg"]
     original_img = tensor2imgs(original_shape_img.unsqueeze(0), mean=img_norm_cfg["mean"], std=img_norm_cfg["std"],
-                               to_rgb=img_norm_cfg["to_rgb"])[0]  # in BGR format
-    original_img = torch.tensor(original_img[:, :, ::-1].copy()).permute(2, 0, 1)  # to RGB tensor [c h w]
+                               to_rgb=img_norm_cfg["to_rgb"])[0]  # in RGB format. ori_image already rgb, no need to swap dim
+    original_img = torch.tensor(original_img.copy()).permute(2, 0, 1)  # to RGB tensor [c h w]
     original_img = original_img.float().to(img.device)
 
     return original_img
@@ -1288,11 +1288,11 @@ class CondInstMaskHead(BaseModule):
              gt_labels,
              points):
         self._iter += 1
-        #similarities matrix, gt_bitmasks
+        #similarities matrix, gt_bitmasks=(gt_nums, 320, 480)
         similarities, gt_bitmasks, bitmasks_full = self.get_targets(gt_bboxes, gt_masks, imgs, img_metas)
         mask_scores = mask_logits.sigmoid()
         gt_bitmasks = torch.cat(gt_bitmasks, dim=0)
-        gt_bitmasks = gt_bitmasks[gt_inds].unsqueeze(1).to(mask_scores.dtype)  # (64,1,1280/8x2,1920/8x2)
+        gt_bitmasks = gt_bitmasks[gt_inds].unsqueeze(1).to(mask_scores.dtype)  # (64,1,1280/8 x2,1920/8x2)
 
         losses = {}
 
@@ -1357,7 +1357,7 @@ class CondInstMaskHead(BaseModule):
                 padded_image_mask = F.pad(original_image_masks, pad=padding)
                 padded_image_masks.append(padded_image_mask)
 
-                original_image = get_original_image(img[i], img_metas[i])  # get RGB image tensor
+                original_image = get_original_image(img[i], img_metas[i])  # get RGB image tensor, ori_image already rgb, no need to swap dim
                 # original_image = original_image.to(img.device)
                 padded_image = F.pad(original_image, pad=padding)
                 padded_images.append(padded_image)

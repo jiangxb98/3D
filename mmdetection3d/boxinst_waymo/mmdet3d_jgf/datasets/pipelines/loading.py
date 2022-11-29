@@ -6,7 +6,7 @@ from mmdet.datasets.pipelines import LoadAnnotations
 from io import BytesIO
 from mmdet3d.datasets.builder import PIPELINES
 import torch
-
+from mmdet.core import BitmapMasks, PolygonMasks
 
 @PIPELINES.register_module()
 class LoadPoints(object):

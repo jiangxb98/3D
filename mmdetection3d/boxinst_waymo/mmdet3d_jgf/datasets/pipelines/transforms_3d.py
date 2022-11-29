@@ -2,10 +2,11 @@ import random
 import torch
 import numpy as np
 from mmcv.utils import build_from_cfg
-from mmdet3d.core.bbox import box_np_ops, Coord3DMode, Box3DMode, BitmapMasks
+from mmdet3d.core.bbox import box_np_ops, Coord3DMode, Box3DMode
 from mmdet3d.datasets.builder import PIPELINES
 from mmdet3d.datasets.builder import OBJECTSAMPLERS
 from mmdet3d.datasets.pipelines import RandomFlip3D
+from mmdet.core import BitmapMasks, PolygonMasks
 import warnings
 import mmcv
 @PIPELINES.register_module(force=True)
