@@ -1059,7 +1059,7 @@ class CondInstMaskHead(BaseModule):
                  pairwise_dilation=2,
                  pairwise_color_thresh=0.3,
                  pairwise_warmup=10000,
-                 points_enabled=False,
+                 points_enabled=True,
                  pairwise_distance_thresh=0.9,  # exp(-0.1)=0.9048
                  norm_cfg=dict(
                      type='BN',
@@ -1299,7 +1299,7 @@ class CondInstMaskHead(BaseModule):
         if self.points_enabled:
             similarities, gt_bitmasks, bitmasks_full, \
             dis_similarities, pt_img_bitmasks, pt_img_bitmasks_full, gt_points_ind \
-                = self.get_targets(gt_bboxes, gt_masks, imgs, img_metas, points)
+                = self.get_targets(gt_bboxes, gt_masks, imgs, img_metas, points)  # bit_masks及full是同一个
         else:
             similarities, gt_bitmasks, bitmasks_full = self.get_targets(gt_bboxes, gt_masks, imgs, img_metas, points)
         
@@ -1333,7 +1333,7 @@ class CondInstMaskHead(BaseModule):
                 img_distance_similarity = img_distance_similarity[gt_inds].to(dtype=mask_scores.dtype)  # [64,8,320,480]
                 weights = ((img_color_similarity >= self.pairwise_color_thresh) &
                     (img_distance_similarity > self.pairwise_distance_thresh)).float() * gt_bitmasks.float()
-            else:       
+            else:
                 # (> color sim threshold points and in gt_boxes points) intersection
                 # weights, [64,8,320,480]
                 weights = (img_color_similarity >= self.pairwise_color_thresh).float() * gt_bitmasks.float()
@@ -1421,12 +1421,12 @@ class CondInstMaskHead(BaseModule):
         assert padded_images.size(2) % stride == 0
         assert padded_images.size(3) % stride == 0
 
-        if points is not None:
-            # 最理想状态是平均池化，但是由于有的地方是0，这样平均会有问题
+        if points is not None:  # 最理想状态是平均池化，但是由于有的地方是0，这样平均会有问题
             downsampled_images = F.max_pool2d(padded_images.float(), kernel_size=stride, stride=stride, padding=0)
+            downsampled_image_masks = F.max_pool2d(padded_image_masks.float(), kernel_size=stride, stride=stride, padding=0)
         else:
             downsampled_images = F.avg_pool2d(padded_images.float(), kernel_size=stride, stride=stride, padding=0)
-        downsampled_image_masks = padded_image_masks[:, start::stride, start::stride]
+            downsampled_image_masks = padded_image_masks[:, start::stride, start::stride]
 
         similarities = []
         bitmasks = []
@@ -1442,7 +1442,7 @@ class CondInstMaskHead(BaseModule):
                                                                 points_image, 
                                                                 downsampled_image_masks[i], 
                                                                 self.pairwise_size,
-                                                                self.pairwise_dilation,
+                                                                1,
                                                                 self.points_enabled)  # [1,8,320,480]
             else:
                 image_lab = color.rgb2lab(downsampled_images[i].byte().permute(1, 2, 0).cpu().numpy())
