@@ -89,7 +89,7 @@ for gt_bbox in gt_bboxes:
     gt_mask = gt_mask_0 | gt_mask_1 | gt_mask
 # 得到id全局索引值
 gt_mask_id = mask_id[gt_mask]
-# 得到所有的值
+# 得到所有投射到2D框内的点的值(N,12)
 in_gt_bboxes_points = in_img_points[gt_mask]
 
 # 3. 对上述的点（在2d bboxes的点）进行球查询
@@ -134,7 +134,8 @@ ball_query_points_neg = in_gt_bboxes_points[~idx_mask]
 # 5. 将得到的点云映射到原始图片，如果维度886x1920，那么也是np.ones((886,1290))
 ori_image_points = torch.zeros((1280, 1920, 3),dtype=torch.float)  # np.ones()*np.inf ???
 ori_image_points_mask = torch.zeros((1280,1920))  # 是否有值的mask
-for point in ball_query_points:
+    # 将点投影到原始图片
+for point in in_gt_bboxes_points:
     if point[6] == sample_idx:
         x_0 = point[8]
         y_0 = point[10]
@@ -146,7 +147,7 @@ for point in ball_query_points:
         ori_image_points[int(y_1), int(x_1)] = torch.tensor([point[0] ,point[1], point[2]])
         ori_image_points_mask[int(y_1), int(x_1)] = 1
 # 6.1 降采样，方法一直接降采样
-# image_points = (320,480,3)
+    # image_points = (320,480,3)
 start = 2
 stride = 4
 image_points = ori_image_points[start::stride, start::stride, :]
@@ -174,7 +175,7 @@ for gt_bbox in gt_bboxes:
     
     cv2.rectangle(img, (int(gt_bbox[0]),int(gt_bbox[1])), (int(gt_bbox[2]),int(gt_bbox[3])), (0,255,0), 2)
 
-# cv2.imwrite('out_plot.jpeg', img)
+# cv2.imwrite('./output_images/out_plot.jpeg', img)
 # points, in_img_points, in_gt_bboxes_points, ball_query_points
 for point in ball_query_points:
     if point[6] == sample_idx:
@@ -185,5 +186,5 @@ for point in ball_query_points:
         x_1 = int(point[9])
         y_1 = int(point[11])
         cv2.circle(img, (x_1, y_1), 1, (0, 255, 0), 1)
-cv2.imwrite('out_plot_in_ball_query_points.jpeg', img)
+cv2.imwrite('./output_images/out_plot_in_ball_query_points.jpeg', img)
 print('finish!!!!!!!!')

@@ -148,7 +148,7 @@ class PadMultiViewImage:
                     max_size = max(results[key][i].shape[:2])
                     self.size = (max_size, max_size)
                 if self.size is not None:
-                    # if only pad top del: shape=, add parm: padding=(0,1280-886,0,0)
+                    # if only pad top. del: shape=, add parm: padding=(0,1280-886,0,0)
                     padded_img = mmcv.impad(
                         results[key][i], shape=self.size[i][:2], pad_val=pad_val)
                 elif self.size_divisor is not None:

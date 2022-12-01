@@ -219,7 +219,7 @@ def unfold_wo_center(x, kernel_size, dilation):
     return unfolded_x
 
 
-def get_image_color_similarity(image, mask, pairwise_size, pairwise_dilation):
+def get_image_color_similarity(image, mask, pairwise_size, pairwise_dilation, points_flag=False):
     """
     \
     :param self:
@@ -236,9 +236,12 @@ def get_image_color_similarity(image, mask, pairwise_size, pairwise_dilation):
         image, kernel_size=pairwise_size, dilation=pairwise_dilation
     )
 
-    diff = image.unsqueeze(2) - unfolded_image
+    diff = image.unsqueeze(2) - unfolded_image  # (1,3,8,320,480)
 
-    similarity = torch.exp(-torch.norm(diff, dim=1) * 0.5)
+    if points_flag:
+        similarity = torch.exp(-torch.norm(diff, dim=1, p=2))  # (1,8,320,480)
+    else:
+        similarity = torch.exp(-torch.norm(diff, dim=1) * 0.5)  # (1,8,320,480)
 
     unfolded_weight = unfold_wo_center(
         mask.unsqueeze(0).unsqueeze(0),
@@ -247,8 +250,6 @@ def get_image_color_similarity(image, mask, pairwise_size, pairwise_dilation):
 
     return similarity * unfolded_weight
 
-def coumputer_points_loss(points, img_metas, gt_bboxes):
-    pass
 
 @HEADS.register_module()
 class CondInstBoxHead(AnchorFreeHead):
@@ -1059,6 +1060,7 @@ class CondInstMaskHead(BaseModule):
                  pairwise_color_thresh=0.3,
                  pairwise_warmup=10000,
                  points_enabled=False,
+                 pairwise_distance_thresh=0.9,  # exp(-0.1)=0.9048
                  norm_cfg=dict(
                      type='BN',
                      requires_grad=True),
@@ -1101,6 +1103,7 @@ class CondInstMaskHead(BaseModule):
         self.pairwise_dilation = pairwise_dilation
         self.pairwise_color_thresh = pairwise_color_thresh
         self.points_enabled = points_enabled
+        self.pairwise_distance_thresh = pairwise_distance_thresh
         self.register_buffer("_iter", torch.zeros([1]))
         self._warmup_iters = pairwise_warmup
 
@@ -1291,11 +1294,18 @@ class CondInstMaskHead(BaseModule):
              gt_labels,
              points):
         self._iter += 1
-        #similarities matrix, gt_bitmasks=(gt_nums, 320, 480)
-        similarities, gt_bitmasks, bitmasks_full = self.get_targets(gt_bboxes, gt_masks, imgs, img_metas)
+        # similarities matrix=(gt_nums, 320, 480), gt_bitmasks=(gt_nums, 320, 480), 
+        # bitmask_full是用来过滤pad的操作产生的不相关像素，pad是从bottom和right pad的
+        if self.points_enabled:
+            similarities, gt_bitmasks, bitmasks_full, \
+            dis_similarities, pt_img_bitmasks, pt_img_bitmasks_full, gt_points_ind \
+                = self.get_targets(gt_bboxes, gt_masks, imgs, img_metas, points)
+        else:
+            similarities, gt_bitmasks, bitmasks_full = self.get_targets(gt_bboxes, gt_masks, imgs, img_metas, points)
+        
         mask_scores = mask_logits.sigmoid()
         gt_bitmasks = torch.cat(gt_bitmasks, dim=0)
-        gt_bitmasks = gt_bitmasks[gt_inds].unsqueeze(1).to(mask_scores.dtype)  # (64,1,1280/8 x2,1920/8x2)
+        gt_bitmasks = gt_bitmasks[gt_inds].unsqueeze(1).to(mask_scores.dtype)  # (gt_nums, 320, 480)-->(64,1,320,480)复制几次mask，多个mask对应一个gt_mask
 
         losses = {}
 
@@ -1306,21 +1316,27 @@ class CondInstMaskHead(BaseModule):
             else:
                 losses["loss_prj"] = dummy_loss
                 losses["loss_pairwise"] = dummy_loss
-        if self.points_enabled:
-            # points loss
-            points_loss = coumputer_points_loss(points, img_metas, gt_bboxes)
-            sample_img_id = img_metas['sample_image_id']
+
         if self.boxinst_enabled:
             img_color_similarity = torch.cat(similarities, dim=0)  # [(14,8,320,480),(N_gt,8,320,480)]
             img_color_similarity = img_color_similarity[gt_inds].to(dtype=mask_scores.dtype)  # [64,8,320,480]
+
             # 1. projection loss
             loss_prj_term = compute_project_term(mask_scores, gt_bitmasks)
+
             # 2. pairwise loss
             # all pixels log, [64,8,320,480]
             pairwise_losses = pairwise_nlog(mask_logits, self.pairwise_size, self.pairwise_dilation)
-            # (> color sim threshold points and in gt_boxes points) intersection
-            # weights, [64,8,320,480]
-            weights = (img_color_similarity >= self.pairwise_color_thresh).float() * gt_bitmasks.float()
+
+            if self.points_enabled:
+                img_distance_similarity = torch.cat(dis_similarities, dim=0)  # [(14,8,320,480),(N_gt,8,320,480)]
+                img_distance_similarity = img_distance_similarity[gt_inds].to(dtype=mask_scores.dtype)  # [64,8,320,480]
+                weights = ((img_color_similarity >= self.pairwise_color_thresh) &
+                    (img_distance_similarity > self.pairwise_distance_thresh)).float() * gt_bitmasks.float()
+            else:       
+                # (> color sim threshold points and in gt_boxes points) intersection
+                # weights, [64,8,320,480]
+                weights = (img_color_similarity >= self.pairwise_color_thresh).float() * gt_bitmasks.float()
 
             loss_pairwise = (pairwise_losses * weights).sum() / weights.sum().clamp(min=1.0)
 
@@ -1339,7 +1355,7 @@ class CondInstMaskHead(BaseModule):
 
         return losses
 
-    def get_targets(self, gt_bboxes, gt_masks, img, img_metas):
+    def get_targets(self, gt_bboxes, gt_masks, img, img_metas, points):
         """get targets"""
 
         if self.boxinst_enabled:
@@ -1350,12 +1366,12 @@ class CondInstMaskHead(BaseModule):
             for i in range(len(img_metas)):
                 original_image_masks = torch.ones(img_metas[i]['img_shape'][:2], dtype=torch.float32, device=img.device)
 
-                im_h = img_metas[i]['ori_shape'][0]
+                im_h = img_metas[i]['ori_shape'][0]  #1280, 886
                 pixels_removed = int(
                     self.bottom_pixels_removed * float(img_metas[i]['img_shape'][0]) / float(im_h)
                 )
                 if pixels_removed > 0:
-                    original_image_masks[-pixels_removed:, :] = 0
+                    original_image_masks[-pixels_removed:, :] = 0  # 最后几行为0
 
                 padding = (0, img.shape[3] - img_metas[i]['img_shape'][1],
                            0, img.shape[2] - img_metas[i]['img_shape'][0])  # [left, right, top, bottom]
@@ -1370,10 +1386,22 @@ class CondInstMaskHead(BaseModule):
 
             padded_image_masks = torch.stack(padded_image_masks, dim=0)
             padded_images = torch.stack(padded_images, dim=0)
-
+            # get color similarities and mask
             similarities, bitmasks, bitmasks_full = self.get_bitmasks_from_boxes(gt_bboxes, padded_images,
-                                                                                 padded_image_masks)
+                                                                    padded_image_masks, None)    
+            # 如果使用点云信息
+            if self.points_enabled:
+                # points and masks
+                gt_points_image, gt_points_image_mask, gt_points_ind = self.get_gt_points_image(points, gt_bboxes, img_metas)
+                gt_points_image = gt_points_image.to(points[0].device)
+                gt_points_image_mask = gt_points_image_mask.to(points[0].device)
+                dis_simlarities, pt_img_bitmasks, pt_img_bitmasks_full = \
+                    self.get_bitmasks_from_boxes(gt_bboxes, 
+                                                gt_points_image,   # torch (1.3.1280.1920)
+                                                gt_points_image_mask,  # torch(1.1280.1920)
+                                                points)
 
+                return similarities, bitmasks, bitmasks_full, dis_simlarities, pt_img_bitmasks, pt_img_bitmasks_full, gt_points_ind         
         else:
             start = int(self.out_stride // 2)
             bitmasks = []
@@ -1385,7 +1413,7 @@ class CondInstMaskHead(BaseModule):
 
         return similarities, bitmasks, bitmasks_full
 
-    def get_bitmasks_from_boxes(self, gt_bboxes, padded_images, padded_image_masks):
+    def get_bitmasks_from_boxes(self, gt_bboxes, padded_images, padded_image_masks, points):
         h, w = padded_images.shape[2:]
         stride = self.out_stride
         start = int(stride // 2)
@@ -1393,7 +1421,11 @@ class CondInstMaskHead(BaseModule):
         assert padded_images.size(2) % stride == 0
         assert padded_images.size(3) % stride == 0
 
-        downsampled_images = F.avg_pool2d(padded_images.float(), kernel_size=stride, stride=stride, padding=0)
+        if points is not None:
+            # 最理想状态是平均池化，但是由于有的地方是0，这样平均会有问题
+            downsampled_images = F.max_pool2d(padded_images.float(), kernel_size=stride, stride=stride, padding=0)
+        else:
+            downsampled_images = F.avg_pool2d(padded_images.float(), kernel_size=stride, stride=stride, padding=0)
         downsampled_image_masks = padded_image_masks[:, start::stride, start::stride]
 
         similarities = []
@@ -1401,13 +1433,26 @@ class CondInstMaskHead(BaseModule):
         bitmasks_full = []
 
         for i, per_img_gt_bboxes in enumerate(gt_bboxes):
-            image_lab = color.rgb2lab(downsampled_images[i].byte().permute(1, 2, 0).cpu().numpy())
-            image_lab = torch.as_tensor(image_lab, device=padded_image_masks.device, dtype=torch.float32)
-            image_lab = image_lab.permute(2, 0, 1)[None]  # [1,3,320,480]
-            image_color_similarity = get_image_color_similarity(
-                image_lab, downsampled_image_masks[i],
-                self.pairwise_size, self.pairwise_dilation
-            )  # [1,8,320,480]
+            if points is not None:
+                points_image = downsampled_images[i]
+                points_image = torch.as_tensor(points_image, device=padded_image_masks.device, dtype=torch.float32)
+                points_image = points_image.unsqueeze(0)  # (1,3,320,480)
+                # 得到一个点与周围几个点的距离(exp(-d))
+                image_color_similarity = get_image_color_similarity(
+                                                                points_image, 
+                                                                downsampled_image_masks[i], 
+                                                                self.pairwise_size,
+                                                                self.pairwise_dilation,
+                                                                self.points_enabled)  # [1,8,320,480]
+            else:
+                image_lab = color.rgb2lab(downsampled_images[i].byte().permute(1, 2, 0).cpu().numpy())
+                image_lab = torch.as_tensor(image_lab, device=padded_image_masks.device, dtype=torch.float32)
+                image_lab = image_lab.permute(2, 0, 1)[None]  # [1,3,320,480]
+                image_color_similarity = get_image_color_similarity(
+                                                                image_lab,
+                                                                downsampled_image_masks[i],
+                                                                self.pairwise_size,
+                                                                self.pairwise_dilation)  # [1,8,320,480]
 
             per_im_bitmasks = []
             per_im_bitmasks_full = []
@@ -1432,3 +1477,56 @@ class CondInstMaskHead(BaseModule):
             bitmasks_full.append(per_im_bitmasks_full)
 
         return similarities, bitmasks, bitmasks_full
+
+
+    def get_gt_points_image(self, points, gt_bboxes, img_metas):
+        """ 非常耗费时间, 因为下面有一个for循环,需要遍历所有的点
+        Return: torch,torch 
+        """
+        # 这里只考虑有一张图片
+        sample_img_id = img_metas[0]['sample_img_id']
+        points = points[0]
+        gt_bboxes = gt_bboxes[0]
+
+        # 1. 过滤掉没有投影到相机的点
+        mask = (points[:, 6] == 0) | (points[:, 7] == 0)  # 真值列表
+        mask_id = torch.where(mask)[0]  # 全局索引值
+        in_img_points = points[mask]
+
+        # 2. 得到在2D bboxes内的点
+        gt_mask = torch.tensor([False for _ in range(mask_id.shape[0])]).to(mask.device)
+        # 使用所有的gt bbox进行筛选
+        for gt_bbox in gt_bboxes:
+            # if 0 cam 8,10（列，行）
+            gt_mask_0 = (((in_img_points[:, 8] > gt_bbox[0]) & (in_img_points[:, 8] < gt_bbox[2])) &
+                        ((in_img_points[:, 10] > gt_bbox[1]) & (in_img_points[:, 10] < gt_bbox[3])) &
+                        (in_img_points[:, 6] == 0))
+            # if 1 cam 9,11
+            gt_mask_1 = (((in_img_points[:, 9] > gt_bbox[0]) & (in_img_points[:, 9] < gt_bbox[2])) &
+                        ((in_img_points[:, 11] > gt_bbox[1]) & (in_img_points[:, 11] < gt_bbox[3])) &
+                        (in_img_points[:, 7] == 0))
+            gt_mask = gt_mask_0 | gt_mask_1 | gt_mask
+        # 得到id全局索引值
+        gt_points_ind = mask_id[gt_mask]
+        # 得到所有投射到2D框内的点的值(N,12)
+        in_gt_bboxes_points = in_img_points[gt_mask]
+
+        # 3. 将得到的点云映射到原始图片，如果维度886x1920，那么也是np.ones((886,1290))
+        ori_points_image = torch.zeros((1280, 1920, 3), dtype=torch.float)  # np.ones()*np.inf ???
+        ori_points_image_mask = torch.zeros((1280, 1920))  # 是否有值的mask
+        # 将点投影到原始图片
+        for point in in_gt_bboxes_points:
+            if point[6] == sample_img_id:
+                x_0 = point[8]
+                y_0 = point[10]
+                ori_points_image[int(y_0), int(x_0)] = torch.tensor([point[0], point[1], point[2]])
+                ori_points_image_mask[int(y_0), int(x_0)] = 1
+            if point[7] == sample_img_id:
+                x_1 = point[9]
+                y_1 = point[11]
+                ori_points_image[int(y_1), int(x_1)] = torch.tensor([point[0], point[1], point[2]])
+                ori_points_image_mask[int(y_1), int(x_1)] = 1
+        
+        ori_points_image = ori_points_image.permute(2,0,1).unsqueeze(0)
+        ori_points_image_mask = ori_points_image_mask.unsqueeze(0)
+        return ori_points_image, ori_points_image_mask, gt_points_ind
