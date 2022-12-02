@@ -217,7 +217,7 @@ class ResizeMultiViewImage:
     def __init__(self,
                  img_scale=None,
                  multiscale_mode='range',
-                 keep_ratio=False,
+                 keep_ratio=True,
                  bbox_clip_border=True,
                  backend='cv2',
                  interpolation='bilinear',):
@@ -299,17 +299,14 @@ class ResizeMultiViewImage:
         for key in results.get('mask_fields', []):
             if results[key] is None:
                 continue
-            multi_gt_masks = []
             for i in range(len(results['img'])):
                 # !!! both rescale and resize both are BitmapMasks(), not a np.array
                 if self.keep_ratio:
                     # to contrast origin of transforms
-                    results[key][i] = results[key][i].rescale(results['scale'][i])  
+                    results[key][i] = results[key][i].rescale(results['scale'][i])
                 else:
                     new_shape=results['img_shape'][i][:2]
-                    multi_gt_masks.append(results[key][i].resize(new_shape))
-
-            results[key] = multi_gt_masks
+                    results[key][i] = results[key][i].resize(new_shape)
 
     def _resize_seg(self, results):
         """Resize semantic segmentation map with ``results['scale']``."""
@@ -584,37 +581,48 @@ class FilterLabelImage:
 class SampleFrameImage:
     def __init__(self,
                 sample = 'random',
-                guide = 'gt_bboxes'):
+                guide = 'gt_bboxes',
+                training = True):
         self.sample = sample
         self.guide = guide
+        self.training = training
     
     def _random_sample(self, results):
         ''''each frame random select a image which has 2d gt_bboxes
         '''
         results['sample_img_id'] = []
-        if self.guide == 'gt_bboxes':
-            for i in range(len(results['gt_labels'])):
-                gt_label = results['gt_labels'][i]
-                if (gt_label==-1).all():
-                    continue
-                else:
-                    results['sample_img_id'].append(i)
-            sample_image_id = random.choice(results['sample_img_id'])
+        if self.training:
+            if self.guide == 'gt_bboxes':
+                for i in range(len(results['gt_labels'])):
+                    gt_label = results['gt_labels'][i]
+                    if (gt_label==-1).all():
+                        continue
+                    else:
+                        results['sample_img_id'].append(i)
+                sample_image_id = random.choice(results['sample_img_id'])
+                results['sample_img_id'] = sample_image_id
+        else:
+            sample_image_id = random.choice(range(5))
             results['sample_img_id'] = sample_image_id
-        
+
         results['img'] = results['img'][sample_image_id]
         results['img_shape'] = results['img_shape'][sample_image_id]
         results['ori_shape'] = results['ori_shape'][sample_image_id]
         results['pad_shape'] = results['pad_shape'][sample_image_id]
+        results['scale_factor'] = results['scale_factor'][sample_image_id]
         results['lidar2img'] = results['lidar2img'][sample_image_id]
         results['pad_fixed_size'] = results['pad_fixed_size'][sample_image_id]
-        results['gt_labels'] = results['gt_labels'][sample_image_id]
-        results['gt_bboxes'] = results['gt_bboxes'][sample_image_id]
+        if 'gt_labels' in results.keys():
+            results['gt_labels'] = results['gt_labels'][sample_image_id]
+        if 'gt_bboxes' in results.keys():
+            results['gt_bboxes'] = results['gt_bboxes'][sample_image_id]
         if 'gt_masks' in results.keys():
             results['gt_masks'] = results['gt_masks'][sample_image_id]
         if 'gt_semantic_seg' in results.keys():
             results['gt_semantic_seg'] = results['gt_semantic_seg'][sample_image_id]
         results.update(dict(img_sample='random'))
+
+
         return results
         
     def _resample(self, results):

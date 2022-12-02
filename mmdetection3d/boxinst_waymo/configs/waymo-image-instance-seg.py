@@ -41,6 +41,12 @@ train_pipeline = [
         with_seg=True,
         with_mask_3d=False,
         with_seg_3d=False),
+    dict(
+        type='ResizeMultiViewImage',
+        # Target size (w, h)
+        img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
+        multiscale_mode='range',
+        keep_ratio=True),
     dict(type='NormalizeMultiViewImage', **img_norm_cfg),
     dict(
         type='PadMultiViewImage',
@@ -50,6 +56,7 @@ train_pipeline = [
         type='SampleFrameImage', 
         sample='random',
         guide='gt_bboxes',
+        training =True,
         ),  # random or resample
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     # dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
@@ -81,11 +88,23 @@ test_pipeline = [
         pts_scale_ratio=1,
         flip=False,
         transforms=[
+            dict(
+                type='ResizeMultiViewImage',
+                # Target size (w, h)
+                img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
+                multiscale_mode='range',
+                keep_ratio=True),
             dict(type='NormalizeMultiViewImage', **img_norm_cfg),
             dict(
                 type='PadMultiViewImage',
                 size=[(1280, 1920),(1280, 1920),(1280, 1920),
                     (1280, 1920),(1280, 1920)]),
+            dict(
+                type='SampleFrameImage', 
+                sample='random',
+                guide='gt_bboxes',
+                training =False,
+                ),  # random or resample    
             dict(type='DefaultFormatBundle3D', class_names=class_names),
             dict(type='Collect3D', keys=['points','img'])
         ])
@@ -99,8 +118,32 @@ eval_pipeline = [
     dict(
         type='LoadImages',
         file_client_args=file_client_args,),
-    dict(type='DefaultFormatBundle3D', class_names=class_names),
-    dict(type='Collect3D', keys=['points', 'img'])    
+    dict(
+        type='MultiScaleFlipAug3D',
+        img_scale=(1920, 1280),
+        pts_scale_ratio=1,
+        flip=False,
+        transforms=[
+            dict(
+                type='ResizeMultiViewImage',
+                # Target size (w, h)
+                img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
+                multiscale_mode='range',
+                keep_ratio=True),
+            dict(type='NormalizeMultiViewImage', **img_norm_cfg),
+            dict(
+                type='PadMultiViewImage',
+                size=[(1280, 1920),(1280, 1920),(1280, 1920),
+                    (1280, 1920),(1280, 1920)]),
+            dict(
+                type='SampleFrameImage', 
+                sample='random',
+                guide='gt_bboxes',
+                training =False,
+                ),  # random or resample    
+            dict(type='DefaultFormatBundle3D', class_names=class_names),
+            dict(type='Collect3D', keys=['points','img'])
+        ])    
 ]
 
 data = dict(

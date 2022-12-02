@@ -57,12 +57,18 @@ class MultiModalAutoLabel(Base3DDetector):
                 pts_middle_encoder)
         if pts_seg_head is not None:
             self.pts_seg_head = builder.build_head(pts_seg_head)
+
         # BoxInst
         if img_backbone:
             self.img_backbone = builder.build_backbone(img_backbone)
         if img_neck is not None:
             self.img_neck = builder.build_neck(img_neck)
+        
         if img_bbox_head is not None:
+            img_train_cfg = train_cfg.img if train_cfg else None
+            img_bbox_head.update(train_cfg=img_train_cfg)
+            img_test_cfg = test_cfg.img if test_cfg else None
+            img_bbox_head.update(test_cfg=img_test_cfg)
             self.img_bbox_head = builder.build_head(img_bbox_head)
         if img_mask_branch is not None:
             self.img_mask_branch = builder.build_head(img_mask_branch)
@@ -72,6 +78,14 @@ class MultiModalAutoLabel(Base3DDetector):
             self.img_segm_head = builder.build_head(img_segm_head)
         else:
             self.img_segm_head = None
+        
+        if pts_bbox_head is not None:
+            pts_train_cfg = train_cfg.pts if train_cfg else None
+            pts_bbox_head.update(train_cfg=pts_train_cfg)
+            pts_test_cfg = test_cfg.pts if test_cfg else None
+            pts_bbox_head.update(test_cfg=pts_test_cfg)
+            self.pts_bbox_head = builder.build_head(pts_bbox_head)       
+    
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
         
