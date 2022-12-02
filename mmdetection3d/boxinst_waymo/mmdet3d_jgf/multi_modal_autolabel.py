@@ -87,29 +87,6 @@ class MultiModalAutoLabel(Base3DDetector):
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
         
-        # If use Pretrained Module
-        if pretrained is None:
-            img_pretrained = None
-            pts_pretrained = None
-        elif isinstance(pretrained, dict):
-            img_pretrained = pretrained.get('img', None)
-            pts_pretrained = pretrained.get('pts', None)
-        else:
-            raise ValueError(
-                f'pretrained should be a dict, got {type(pretrained)}')
-        if self.with_img_backbone:
-            if img_pretrained is not None:
-                warnings.warn('DeprecationWarning: pretrained is a deprecated '
-                              'key, please consider using init_cfg.')
-                self.img_backbone.init_cfg = dict(
-                    type='Pretrained', checkpoint=img_pretrained)
-        if self.with_pts_backbone:
-            if pts_pretrained is not None:
-                warnings.warn('DeprecationWarning: pretrained is a deprecated '
-                              'key, please consider using init_cfg')
-                self.pts_backbone.init_cfg = dict(
-                    type='Pretrained', checkpoint=pts_pretrained)
-
     @property
     def with_img_shared_head(self):
         """bool: Whether the detector has a shared head in image branch."""
