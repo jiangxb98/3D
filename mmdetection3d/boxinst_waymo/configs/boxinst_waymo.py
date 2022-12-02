@@ -83,7 +83,8 @@ model = dict(
                 ignore_iof_thr=-1),
             allowed_border=-1,
             pos_weight=-1,
-            debug=False)
+            debug=False),
+        pts=dict()
         ),
     test_cfg=dict(
         img=dict(
@@ -91,5 +92,6 @@ model = dict(
             min_bbox_size=0,
             score_thr=0.05,
             nms=dict(type='nms', iou_threshold=0.5),
-            max_per_img=100))
+            max_per_img=100)),
+        pts=dict()
         )

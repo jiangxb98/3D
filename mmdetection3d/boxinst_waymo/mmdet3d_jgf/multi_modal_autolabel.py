@@ -57,13 +57,18 @@ class MultiModalAutoLabel(Base3DDetector):
                 pts_middle_encoder)
         if pts_seg_head is not None:
             self.pts_seg_head = builder.build_head(pts_seg_head)
+        if pts_bbox_head is not None:
+            pts_train_cfg = train_cfg.pts if train_cfg else None
+            pts_bbox_head.update(train_cfg=pts_train_cfg)
+            pts_test_cfg = test_cfg.pts if test_cfg else None
+            pts_bbox_head.update(test_cfg=pts_test_cfg)
+            self.pts_bbox_head = builder.build_head(pts_bbox_head)       
 
         # BoxInst
         if img_backbone:
             self.img_backbone = builder.build_backbone(img_backbone)
         if img_neck is not None:
             self.img_neck = builder.build_neck(img_neck)
-        
         if img_bbox_head is not None:
             img_train_cfg = train_cfg.img if train_cfg else None
             img_bbox_head.update(train_cfg=img_train_cfg)
@@ -79,13 +84,6 @@ class MultiModalAutoLabel(Base3DDetector):
         else:
             self.img_segm_head = None
         
-        if pts_bbox_head is not None:
-            pts_train_cfg = train_cfg.pts if train_cfg else None
-            pts_bbox_head.update(train_cfg=pts_train_cfg)
-            pts_test_cfg = test_cfg.pts if test_cfg else None
-            pts_bbox_head.update(test_cfg=pts_test_cfg)
-            self.pts_bbox_head = builder.build_head(pts_bbox_head)       
-    
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
         
@@ -99,7 +97,6 @@ class MultiModalAutoLabel(Base3DDetector):
         else:
             raise ValueError(
                 f'pretrained should be a dict, got {type(pretrained)}')
-        # Init the module    
         if self.with_img_backbone:
             if img_pretrained is not None:
                 warnings.warn('DeprecationWarning: pretrained is a deprecated '
