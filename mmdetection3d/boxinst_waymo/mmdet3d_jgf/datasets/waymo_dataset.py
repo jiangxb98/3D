@@ -174,6 +174,7 @@ class WaymoDataset(Custom3DDataset):
                          points['cam_row_0'].astype('i2'),
                          points['cam_row_1'].astype('i2'),
                          ], axis=-1)
+
     @staticmethod
     def img_loader(results, pts_bytes):
         return None
@@ -282,7 +283,6 @@ class WaymoDataset(Custom3DDataset):
 
     def update_skip_type_keys(self, skip_type_keys):
         self._skip_type_keys = skip_type_keys
-
 
     def format_results(self, outputs, pklfile_prefix=None):
         if 'pts_bbox' in outputs[0]:

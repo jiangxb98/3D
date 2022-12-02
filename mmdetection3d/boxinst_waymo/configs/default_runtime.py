@@ -10,6 +10,6 @@ log_level = 'INFO'
 work_dir = None
 load_from = None
 resume_from = None
-workflow = [('train', 1)]
+workflow = [('train', 1),('val',1)]
 opencv_num_threads = 0
 mp_start_method = 'fork'

@@ -162,7 +162,7 @@ data = dict(
         panseg_classes = class_names,
         panseg_info_path='training/infos',))        
 
-evaluation = dict(interval=24, pipeline=eval_pipeline)
+evaluation = dict(interval=1, pipeline=eval_pipeline)
 custom_imports = dict(
     imports=['boxinst_waymo.mmdet3d_jgf'],
     allow_failed_imports=False)

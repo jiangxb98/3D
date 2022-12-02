@@ -11,7 +11,7 @@ from torch.nn import functional as F
 
 from mmdet3d.core import (Box3DMode, Coord3DMode, bbox3d2result,
                           merge_aug_bboxes_3d, show_result)
-from mmdet.core import multi_apply
+from mmdet.core import multi_apply, bbox2result
 
 from mmdet3d.models import builder
 from mmdet3d.models.builder import DETECTORS
@@ -380,15 +380,26 @@ class MultiModalAutoLabel(Base3DDetector):
         return losses
 
     def simple_test_img(self, x, img_metas, proposals=None, rescale=False):
-        """Test without augmentation."""
-        if proposals is None:
-            proposal_list = self.simple_test_rpn(x, img_metas,
-                                                 self.test_cfg.img_rpn)
-        else:
-            proposal_list = proposals
+        feat = x
+        outputs = self.img_bbox_head.simple_test(
+            feat, self.img_mask_head.param_conv, img_metas, rescale=rescale)
+        det_bboxes, det_labels, det_params, det_coors, det_level_inds = zip(*outputs)
+        bbox_results = [
+            bbox2result(det_bbox, det_label, self.img_bbox_head.num_classes)
+            for det_bbox, det_label in zip(det_bboxes, det_labels)
+        ]
 
-        return self.img_roi_head.simple_test(
-            x, proposal_list, img_metas, rescale=rescale)
+        mask_feat = self.img_mask_branch(feat)
+        mask_results = self.img_mask_head.simple_test(
+            mask_feat,
+            det_labels,
+            det_params,
+            det_coors,
+            det_level_inds,
+            img_metas,
+            self.img_bbox_head.num_classes,
+            rescale=rescale)
+        return list(zip(bbox_results, mask_results))
 
     def simple_test_rpn(self, x, img_metas, rpn_test_cfg):
         """RPN test function."""
