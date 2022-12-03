@@ -71,7 +71,8 @@ model = dict(
         pairwise_size=3,  # 3*3大小 9-1=8
         pairwise_dilation=2,
         pairwise_color_thresh=0.3,
-        pairwise_warmup=10000),
+        pairwise_warmup=10000,
+        points_enabled=False),
     # training and testing settings
     train_cfg=dict(
         img=dict(
@@ -84,7 +85,7 @@ model = dict(
             allowed_border=-1,
             pos_weight=-1,
             debug=False),
-        pts=dict()
+        # pts=dict()
         ),
     test_cfg=dict(
         img=dict(
@@ -93,5 +94,5 @@ model = dict(
             score_thr=0.05,
             nms=dict(type='nms', iou_threshold=0.5),
             max_per_img=100)),
-        pts=dict()
+        # pts=dict()
         )

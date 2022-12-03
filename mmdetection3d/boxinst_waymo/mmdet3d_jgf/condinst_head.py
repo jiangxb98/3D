@@ -1059,7 +1059,7 @@ class CondInstMaskHead(BaseModule):
                  pairwise_dilation=2,
                  pairwise_color_thresh=0.3,
                  pairwise_warmup=10000,
-                 points_enabled=True,
+                 points_enabled=False,
                  pairwise_distance_thresh=0.9,  # exp(-0.1)=0.9048
                  norm_cfg=dict(
                      type='BN',

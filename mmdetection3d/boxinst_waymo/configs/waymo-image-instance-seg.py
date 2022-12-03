@@ -44,14 +44,16 @@ train_pipeline = [
     dict(
         type='ResizeMultiViewImage',
         # Target size (w, h)
-        img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
+        img_scale=[(960, 640),(960, 640),(960, 640),(960, 640),(960, 640)],
         multiscale_mode='range',
         keep_ratio=True),
     dict(type='NormalizeMultiViewImage', **img_norm_cfg),
     dict(
         type='PadMultiViewImage',
-        size=[(1280, 1920),(1280, 1920),(1280, 1920),
-            (1280, 1920),(1280, 1920)]),
+        # size=[(1280, 1920),(1280, 1920),(1280, 1920),
+        #     (1280, 1920),(1280, 1920)]),
+        size=[(640, 960),(640, 960),(640, 960),
+            (640, 960),(640, 960)]),
     dict(
         type='SampleFrameImage', 
         sample='random',
@@ -84,21 +86,23 @@ test_pipeline = [
         file_client_args=file_client_args,),
     dict(
         type='MultiScaleFlipAug3D',
-        img_scale=(1920, 1280),
+        img_scale=(960, 640),
         pts_scale_ratio=1,
         flip=False,
         transforms=[
             dict(
                 type='ResizeMultiViewImage',
                 # Target size (w, h)
-                img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
+                img_scale=[(960, 640),(960, 640),(960, 640),(960, 640),(960, 640)],
                 multiscale_mode='range',
                 keep_ratio=True),
             dict(type='NormalizeMultiViewImage', **img_norm_cfg),
             dict(
                 type='PadMultiViewImage',
-                size=[(1280, 1920),(1280, 1920),(1280, 1920),
-                    (1280, 1920),(1280, 1920)]),
+                # size=[(1280, 1920),(1280, 1920),(1280, 1920),
+                #     (1280, 1920),(1280, 1920)]),
+                size=[(640, 960),(640, 960),(640, 960),
+                    (640, 960),(640, 960)]),
             dict(
                 type='SampleFrameImage', 
                 sample='random',
@@ -127,14 +131,17 @@ eval_pipeline = [
             dict(
                 type='ResizeMultiViewImage',
                 # Target size (w, h)
-                img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
+                # img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
+                img_scale=[(960, 640),(960, 640),(960, 640),(960, 640),(960, 640)],
                 multiscale_mode='range',
                 keep_ratio=True),
             dict(type='NormalizeMultiViewImage', **img_norm_cfg),
             dict(
                 type='PadMultiViewImage',
-                size=[(1280, 1920),(1280, 1920),(1280, 1920),
-                    (1280, 1920),(1280, 1920)]),
+                # size=[(1280, 1920),(1280, 1920),(1280, 1920),
+                #     (1280, 1920),(1280, 1920)]),
+                size=[(640, 960),(640, 960),(640, 960),
+                    (640, 960),(640, 960)]),
             dict(
                 type='SampleFrameImage', 
                 sample='random',
