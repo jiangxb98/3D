@@ -609,6 +609,7 @@ class SampleFrameImage:
         results['img_shape'] = results['img_shape'][sample_image_id]
         results['ori_shape'] = results['ori_shape'][sample_image_id]
         results['pad_shape'] = results['pad_shape'][sample_image_id]
+        results['scale'] = results['scale'][sample_image_id]
         results['scale_factor'] = results['scale_factor'][sample_image_id]
         results['lidar2img'] = results['lidar2img'][sample_image_id]
         results['pad_fixed_size'] = results['pad_fixed_size'][sample_image_id]

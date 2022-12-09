@@ -1139,7 +1139,7 @@ class CondInstMaskHead(BaseModule):
         return weights_list, biases_list
 
     def forward(self, feat, params, coors, level_inds, img_inds):
-        mask_feat = feat[img_inds]  # [1,16,160,240]-->[56,16,160,240]
+        mask_feat = feat[img_inds]  # [1,16,160,240]-->[N个mask,16,160,240]
         N, _, H, W = mask_feat.size()
         if not self.disable_rel_coors:
             shift_x = torch.arange(0, W * self.in_stride, step=self.in_stride,
@@ -1253,11 +1253,11 @@ class CondInstMaskHead(BaseModule):
             segm_results = [[[] for _ in range(num_classes)]
                             for _ in range(num_imgs)]
             return segm_results
-
+        #
         mask_preds = self.forward(mask_feat, det_params, det_coors, det_level_inds,
                                   det_img_inds)
-        mask_preds = mask_preds.sigmoid()
-        mask_preds = aligned_bilinear(mask_preds, self.out_stride)
+        mask_preds = mask_preds.sigmoid()  #
+        mask_preds = aligned_bilinear(mask_preds, self.out_stride)  # 20400
 
         segm_results = []
         mask_preds = torch.split(mask_preds, num_inst_list, dim=0)
