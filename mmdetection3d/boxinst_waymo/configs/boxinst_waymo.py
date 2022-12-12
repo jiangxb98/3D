@@ -72,7 +72,10 @@ model = dict(
         pairwise_dilation=2,
         pairwise_color_thresh=0.3,
         pairwise_warmup=10000,
-        points_enabled=False),
+        points_enabled=True),
+    
+    pts_gen_points=dict(type='GenPoints'),
+    
     # training and testing settings
     train_cfg=dict(
         img=dict(

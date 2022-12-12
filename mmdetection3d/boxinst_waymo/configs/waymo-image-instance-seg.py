@@ -44,17 +44,17 @@ train_pipeline = [
     dict(
         type='ResizeMultiViewImage',
         # Target size (w, h)
-        # img_scale=[(960, 640),(960, 640),(960, 640),(960, 640),(960, 640)],
-        img_scale=[(1920,1280),(1920,1280),(1920,1280),(1920,1280),(1920,1280)],
+        img_scale=[(960, 640),(960, 640),(960, 640),(960, 640),(960, 640)],
+        # img_scale=[(1920,1280),(1920,1280),(1920,1280),(1920,1280),(1920,1280)],
         multiscale_mode='range',
         keep_ratio=True),
     dict(type='NormalizeMultiViewImage', **img_norm_cfg),
     dict(
         type='PadMultiViewImage',
-        size=[(1280, 1920),(1280, 1920),(1280, 1920),
-            (1280, 1920),(1280, 1920)]),
-        # size=[(640, 960),(640, 960),(640, 960),
-        #     (640, 960),(640, 960)]),
+        # size=[(1280, 1920),(1280, 1920),(1280, 1920),
+        #     (1280, 1920),(1280, 1920)]),
+        size=[(640, 960),(640, 960),(640, 960),
+            (640, 960),(640, 960)]),
     dict(
         type='SampleFrameImage', 
         sample='random',
@@ -64,6 +64,10 @@ train_pipeline = [
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     # dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='PointShuffle'),
+
+    # 过滤掉2D Boxes外的点
+    dict(type='FilterGTBboxesPoints', gt_boxes_enabled=True),
+
     # To DataContainer
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
@@ -87,24 +91,24 @@ test_pipeline = [
         file_client_args=file_client_args,),
     dict(
         type='MultiScaleFlipAug3D',
-        img_scale=(1920, 1280),
+        img_scale=(960, 640),
         pts_scale_ratio=1,
         flip=False,
         transforms=[
             dict(
                 type='ResizeMultiViewImage',
                 # Target size (w, h)
-                # img_scale=[(960, 640),(960, 640),(960, 640),(960, 640),(960, 640)],
-                img_scale=[(1920,1280),(1920,1280),(1920,1280),(1920,1280),(1920,1280)],
+                img_scale=[(960, 640),(960, 640),(960, 640),(960, 640),(960, 640)],
+                # img_scale=[(1920,1280),(1920,1280),(1920,1280),(1920,1280),(1920,1280)],
                 multiscale_mode='range',
                 keep_ratio=True),
             dict(type='NormalizeMultiViewImage', **img_norm_cfg),
             dict(
                 type='PadMultiViewImage',
-                size=[(1280, 1920),(1280, 1920),(1280, 1920),
-                    (1280, 1920),(1280, 1920)]),
-                # size=[(640, 960),(640, 960),(640, 960),
-                #     (640, 960),(640, 960)]),
+                # size=[(1280, 1920),(1280, 1920),(1280, 1920),
+                #     (1280, 1920),(1280, 1920)]),
+                size=[(640, 960),(640, 960),(640, 960),
+                    (640, 960),(640, 960)]),
             dict(
                 type='SampleFrameImage', 
                 sample='random',
@@ -126,24 +130,24 @@ eval_pipeline = [
         file_client_args=file_client_args,),
     dict(
         type='MultiScaleFlipAug3D',
-        img_scale=(1920, 1280),
+        img_scale=(960, 640),
         pts_scale_ratio=1,
         flip=False,
         transforms=[
             dict(
                 type='ResizeMultiViewImage',
                 # Target size (w, h)
-                img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
-                # img_scale=[(960, 640),(960, 640),(960, 640),(960, 640),(960, 640)],
+                # img_scale=[(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280),(1920, 1280)],
+                img_scale=[(960, 640),(960, 640),(960, 640),(960, 640),(960, 640)],
                 multiscale_mode='range',
                 keep_ratio=True),
             dict(type='NormalizeMultiViewImage', **img_norm_cfg),
             dict(
                 type='PadMultiViewImage',
-                size=[(1280, 1920),(1280, 1920),(1280, 1920),
-                    (1280, 1920),(1280, 1920)]),
-                # size=[(640, 960),(640, 960),(640, 960),
-                #     (640, 960),(640, 960)]),
+                # size=[(1280, 1920),(1280, 1920),(1280, 1920),
+                #     (1280, 1920),(1280, 1920)]),
+                size=[(640, 960),(640, 960),(640, 960),
+                    (640, 960),(640, 960)]),
             dict(
                 type='SampleFrameImage', 
                 sample='random',

@@ -639,8 +639,43 @@ class SampleFrameImage:
         return results
 
 @PIPELINES.register_module()
-class FilterLidarPoint:
+class FilterGTBboxesPoints:
     """
     The corresponding point cloud is obtained 
-    according to the sampled images idx
+    according to the 2D GT Boxes
     """
+    def __init__(self, gt_boxes_enabled=False):
+        self.gt_boxes_enabled = gt_boxes_enabled
+
+    def _filter_points(self, results):
+        points = results['points']
+        gt_bboxes = results['gt_bboxes']
+        gt_mask = np.array([False for _ in range(points.shape[0])])
+        for gt_bbox in gt_bboxes:
+            # if 0 cam 8,10（列，行）
+            gt_mask_0 = (((points[:, 8] > gt_bbox[0]) & (points[:, 8] < gt_bbox[2])) &
+                        ((points[:, 10] > gt_bbox[1]) & (points[:, 10] < gt_bbox[3])) &
+                        (points[:, 6] == 0))
+            # if 1 cam 9,11
+            gt_mask_1 = (((points[:, 9] > gt_bbox[0]) & (points[:, 9] < gt_bbox[2])) &
+                        ((points[:, 11] > gt_bbox[1]) & (points[:, 11] < gt_bbox[3])) &
+                        (points[:, 7] == 0))
+            gt_mask = gt_mask_0 | gt_mask_1 | gt_mask
+        points_mask = np.indices(points.shape).squeeze()
+        gt_points_mask = points_mask[gt_mask]
+        in_gt_bboxes_points = points[gt_mask]
+        
+        results['ori_points'] = results['points']
+        results['points'] = in_gt_bboxes_points
+        results['points_mask'] = gt_points_mask
+        results['filter_gt_bboxes_points'] = self.gt_boxes_enabled
+
+        return results
+        
+
+
+
+    def __call__(self, results):
+        if self.gt_boxes_enabled:
+            results = self._filter_points(results)
+        return results

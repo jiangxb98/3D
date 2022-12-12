@@ -1257,7 +1257,7 @@ class CondInstMaskHead(BaseModule):
         mask_preds = self.forward(mask_feat, det_params, det_coors, det_level_inds,
                                   det_img_inds)
         mask_preds = mask_preds.sigmoid()  #
-        mask_preds = aligned_bilinear(mask_preds, self.out_stride)  # 20400
+        mask_preds = aligned_bilinear(mask_preds, self.out_stride)  # 
 
         segm_results = []
         mask_preds = torch.split(mask_preds, num_inst_list, dim=0)
@@ -1426,8 +1426,8 @@ class CondInstMaskHead(BaseModule):
 
         if points is not None:
             # downsampled_images = F.max_pool2d(padded_images.float(), kernel_size=stride, stride=stride, padding=0)
-            downsampled_images = self.mean_pool(padded_images, padded_image_masks, kernel_size=stride, stride=stride, )
-            downsampled_image_masks = F.max_pool2d(padded_image_masks.float(), kernel_size=stride, stride=stride, padding=0)
+            downsampled_images = self.mean_pool(padded_images, padded_image_masks, kernel_size=stride*2, stride=stride*2)  # test
+            downsampled_image_masks = F.max_pool2d(padded_image_masks.float(), kernel_size=stride*2, stride=stride*2, padding=0)
         else:
             downsampled_images = F.avg_pool2d(padded_images.float(), kernel_size=stride, stride=stride, padding=0)
             downsampled_image_masks = padded_image_masks[:, start::stride, start::stride]
@@ -1549,6 +1549,7 @@ class CondInstMaskHead(BaseModule):
         return gt_points_images, gt_points_image_masks, gt_points_inds
 
     def mean_pool(self, points_image, points_iamge_mask, kernel_size=4, stride=4):
+        # 需要添加过滤部分，参考lwsis网络中过滤点的操作
         n, h, w = points_iamge_mask.shape
         mean_pools = []
         for i, per_img in enumerate(points_image):  # 表示几张图片
@@ -1561,7 +1562,7 @@ class CondInstMaskHead(BaseModule):
                 unfold_sum = unfold_pt_img.sum(dim=1)
                 # 如果分母为0，也就是没有点，那么池化后的结果是nan
                 unfold_mean = unfold_sum / unfold_mask
-                mean_pool.append(unfold_mean.reshape(int(h/4), int(w/4)))
+                mean_pool.append(unfold_mean.reshape(int(h/kernel_size), int(w/kernel_size)))
             mean_pools.append(torch.stack(mean_pool, dim=0))
         return torch.stack(mean_pools, dim=0)
 
