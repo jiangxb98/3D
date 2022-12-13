@@ -1400,8 +1400,8 @@ class CondInstMaskHead(BaseModule):
                 gt_points_image_masks = gt_points_image_masks.to(points[0].device)
                 dis_simlarities, pt_img_bitmasks, pt_img_bitmasks_full = \
                     self.get_bitmasks_from_boxes(gt_bboxes, 
-                                                gt_points_image,   # torch (1.3.1280.1920)
-                                                gt_points_image_masks,  # torch(1.1280.1920)
+                                                gt_points_image,   # torch (B.3.1280.1920)
+                                                gt_points_image_masks,  # torch(B.1280.1920)
                                                 points)
 
                 return similarities, bitmasks, bitmasks_full, dis_simlarities, pt_img_bitmasks, pt_img_bitmasks_full, gt_points_ind         
