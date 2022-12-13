@@ -1080,14 +1080,14 @@ class CondInstMaskHead(BaseModule):
         self.dynamic_channels = dynamic_channels
         self.disable_rel_coors = disable_rel_coors
         dy_weights, dy_biases = [], []
-        dynamic_in_channels = in_channels if disable_rel_coors else in_channels + 2
+        dynamic_in_channels = in_channels if disable_rel_coors else in_channels + 2  #16是mask branch的输出，16+2，2是坐标x,y
         for i in range(dynamic_convs):
             in_chn = dynamic_in_channels if i == 0 else dynamic_channels
             out_chn = 1 if i == dynamic_convs - 1 else dynamic_channels
             dy_weights.append(in_chn * out_chn)
             dy_biases.append(out_chn)
-        self.dy_weights = dy_weights
-        self.dy_biases = dy_biases
+        self.dy_weights = dy_weights  # 18*8=144,8*8=64,8*1=8
+        self.dy_biases = dy_biases  # 8,8,1
         self.num_gen_params = sum(dy_weights) + sum(dy_biases)
         self.bbox_head_channels = bbox_head_channels
 
@@ -1232,9 +1232,9 @@ class CondInstMaskHead(BaseModule):
     def simple_test(self,
                     mask_feat,
                     det_labels,
-                    det_params,
-                    det_coors,
-                    det_level_inds,
+                    det_params,  # (N,233)
+                    det_coors,  # (N,2)
+                    det_level_inds,  # 表示检测出来instance的再fpn的第几层 (N,)
                     img_metas,
                     num_classes,
                     rescale=False):
@@ -1303,7 +1303,7 @@ class CondInstMaskHead(BaseModule):
         else:
             similarities, gt_bitmasks, bitmasks_full = self.get_targets(gt_bboxes, gt_masks, imgs, img_metas, points)
         
-        mask_scores = mask_logits.sigmoid()
+        mask_scores = mask_logits.sigmoid()  # (64,1,320,480)
         gt_bitmasks = torch.cat(gt_bitmasks, dim=0)
         gt_bitmasks = gt_bitmasks[gt_inds].unsqueeze(1).to(mask_scores.dtype)  # (gt_nums, 320, 480)-->(64,1,320,480)复制几次mask，多个mask对应一个gt_mask
 
@@ -1394,7 +1394,7 @@ class CondInstMaskHead(BaseModule):
                                                                     padded_image_masks, None)    
             # 如果使用点云信息
             if self.points_enabled:
-                # points and masks
+                # points and masks 得到的points_image是1280x1920的，但对于计算量太大，所以输入时resize成1/2了
                 gt_points_image, gt_points_image_masks, gt_points_ind = self.get_gt_points_image(points, gt_bboxes, img_metas)
                 gt_points_image = gt_points_image.to(points[0].device)
                 gt_points_image_masks = gt_points_image_masks.to(points[0].device)
@@ -1495,7 +1495,7 @@ class CondInstMaskHead(BaseModule):
         for i, per_img_metas in enumerate(img_metas):
             sample_img_id = per_img_metas['sample_img_id']
             points = points_[i]
-            gt_bboxes = gt_bboxes_[i]
+            gt_bboxes = gt_bboxes_[i]/per_img_metas['scale_factor'][0]
 
             # 1. 过滤掉没有投影到相机的点
             mask = (points[:, 6] == 0) | (points[:, 7] == 0)  # 真值列表
@@ -1545,7 +1545,7 @@ class CondInstMaskHead(BaseModule):
 
         gt_points_images = torch.stack(gt_points_images, dim=0)  # ()
         gt_points_image_masks = torch.stack(gt_points_image_masks, dim=0)
-        gt_points_inds = torch.stack(gt_points_inds, dim=0)
+        gt_points_inds = gt_points_inds  # 点云长度不同，所以只能是列表
         return gt_points_images, gt_points_image_masks, gt_points_inds
 
     def mean_pool(self, points_image, points_iamge_mask, kernel_size=4, stride=4):
@@ -1562,7 +1562,15 @@ class CondInstMaskHead(BaseModule):
                 unfold_sum = unfold_pt_img.sum(dim=1)
                 # 如果分母为0，也就是没有点，那么池化后的结果是nan
                 unfold_mean = unfold_sum / unfold_mask
+                # 0替换nan
+                unfold_mean = torch.nan_to_num(unfold_mean, nan=0)
                 mean_pool.append(unfold_mean.reshape(int(h/kernel_size), int(w/kernel_size)))
             mean_pools.append(torch.stack(mean_pool, dim=0))
         return torch.stack(mean_pools, dim=0)
+
+    def filter_noise(self, gt_bboxes, points, stride=3, kernel_size=3):
+        '''送入的点(gt_nums, 3, h, w)'''
+        for i, gt_bbox in enumerate(gt_bboxes):
+            gt_bbox_img_block = points[:, gt_bbox[1]:gt_bbox[3], gt_bbox[0]:gt_bbox[2]]
+        pass
 

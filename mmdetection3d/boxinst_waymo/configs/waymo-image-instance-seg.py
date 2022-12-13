@@ -66,7 +66,7 @@ train_pipeline = [
     dict(type='PointShuffle'),
 
     # 过滤掉2D Boxes外的点
-    dict(type='FilterGTBboxesPoints', gt_boxes_enabled=True),
+    # dict(type='FilterGTBboxesPoints', gt_boxes_enabled=True),
 
     # To DataContainer
     dict(type='DefaultFormatBundle3D', class_names=class_names),
@@ -160,7 +160,7 @@ eval_pipeline = [
 ]
 
 data = dict(
-    samples_per_gpu=1,
+    samples_per_gpu=2,
     workers_per_gpu=0,
     train=dict(
         type=dataset_type,

@@ -407,6 +407,7 @@ class MultiModalAutoLabel(Base3DDetector):
         ]
         return bbox_results
 
+    # Base3DDetector的forward_test()内进入simple_test函数
     def simple_test(self, points, img_metas, img=None, rescale=False):
         """Test function without augmentaiton."""
         img_feats, pts_feats = self.extract_feat(
@@ -420,7 +421,7 @@ class MultiModalAutoLabel(Base3DDetector):
                 result_dict['pts_bbox'] = pts_bbox
         if img_feats and self.with_img_bbox:
             bbox_img = self.simple_test_img(
-                img_feats, img_metas, rescale=rescale)
+                img_feats, img_metas, rescale=rescale) # bbox_img, mask_img
             for result_dict, img_bbox in zip(bbox_list, bbox_img):
                 result_dict['img_bbox'] = img_bbox
         return bbox_list
