@@ -673,8 +673,6 @@ class FilterGTBboxesPoints:
         return results
         
 
-
-
     def __call__(self, results):
         if self.gt_boxes_enabled:
             results = self._filter_points(results)

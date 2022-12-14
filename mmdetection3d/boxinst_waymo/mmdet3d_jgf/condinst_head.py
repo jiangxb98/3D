@@ -1498,7 +1498,7 @@ class CondInstMaskHead(BaseModule):
             gt_bboxes = gt_bboxes_[i]/per_img_metas['scale_factor'][0]
 
             # 1. 过滤掉没有投影到相机的点
-            mask = (points[:, 6] == 0) | (points[:, 7] == 0)  # 真值列表
+            mask = (points[:, 6] == sample_img_id) | (points[:, 7] == sample_img_id)  # 真值列表
             mask_id = torch.where(mask)[0]  # 全局索引值
             in_img_points = points[mask]
 
