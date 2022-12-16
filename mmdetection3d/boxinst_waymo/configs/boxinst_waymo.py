@@ -27,6 +27,9 @@ model = dict(
         add_extra_convs='on_output',  # use P5
         num_outs=5,
         relu_before_extra_convs=True),
+    middle_encoder_pts=dict(
+        type='GenPoints',
+    ),
     img_bbox_head=dict(
         type='CondInstBoxHead',
         num_classes=3,

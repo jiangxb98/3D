@@ -1,17 +1,53 @@
-from mmcv.runner import BaseModule
-from mmdet3d.models.builder import MIDDLE_ENCODERS
-from mmdet3d_jgf.point_sa import AttentionPointEncoder
-import numpy as np
-
 import torch
+import torchvision
 from torch import nn
 import torch.nn.functional as F
-import torchvision
 
+from mmcv.runner import BaseModule
+from mmdet3d.models.builder import MIDDLE_ENCODERS
+
+import numpy as np
 from .modality_mapper import img2pc
+from .point_sa import AttentionPointEncoder
 from .point_ops import build_image_location_map_single
 
+from easydict import EasyDict
 
+class FPN(nn.Module):
+    def __init__(self, in_channel=3, inter_size=128, out_channel=None) -> None:
+        super().__init__()
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(in_channel, inter_size, 3, padding=1),
+            nn.BatchNorm2d(inter_size),
+            nn.ReLU()
+        )
+        self.layer2 = nn.Sequential(
+            nn.Conv2d(inter_size, inter_size, 3, padding=1),
+            nn.BatchNorm2d(inter_size),
+            nn.ReLU()
+        )
+        self.layer3 = nn.Sequential(
+            nn.Conv2d(inter_size, inter_size, 3, padding=1),
+            nn.BatchNorm2d(inter_size),
+            nn.ReLU()
+        )
+        # self.layer4 = nn.Sequential(
+        #     nn.Conv2d(inter_size, inter_size, 3, padding=1),
+        #     nn.BatchNorm2d(inter_size),
+        #     nn.ReLU()
+        # )
+        self.raise_channel = nn.Conv2d(inter_size*3, out_channel, 1)
+        
+    def forward(self, img):
+        # img: (B, C, H, W)
+        x1 = self.layer1(img)
+        x2 = self.layer2(x1)
+        x3 = self.layer3(x2)
+        # x4 = self.layer4(x3)
+
+        fpn = torch.cat([x1, x2, x3], dim=1)
+        fpn = self.raise_channel(fpn)
+        return fpn, x3
 
 @MIDDLE_ENCODERS.register_module()
 class GenPoints(BaseModule):
@@ -26,7 +62,7 @@ class GenPoints(BaseModule):
                 out_img_size=112,
                 out_cloud_size=512,  # box img内的点云数量
                 mask_ratio=[0.0, 0.95],
-                point_attention_cfg=dict(
+                point_attention_cfg=EasyDict(dict(
                     use_cls_token=True,
                     fore_attn=False,
                     num_layers=4,
@@ -39,14 +75,16 @@ class GenPoints(BaseModule):
                     num_heads=12,
                     dropout_rate=0.2,
                     intermediate_size=1024,
-                )):
-
+                ))):
+        super().__init__()
         self.mask_and_jitter=mask_and_jitter
         self.sparse_query_rate=sparse_query_rate
         self.out_img_size = out_img_size
         self.out_cloud_size = out_cloud_size
         self.mask_ratio = mask_ratio
         
+        self.cnn = FPN(3, 128, cimg)
+
         # MAttn Transformer
         self.attention_layers = AttentionPointEncoder(point_attention_cfg)
 
@@ -84,11 +122,12 @@ class GenPoints(BaseModule):
             torchvision.transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         )
 
-    def forward(self, points, img, img_feat, img_metas, gt_bboxes, gt_labels):
+    def forward(self, points, img, img_metas, gt_bboxes, gt_labels):
         '''
         点云特征和图片特征直接从backbone里拿就好了
         '''
-        boxes_img_infos_list = self.crop_boxes_img(img_metas, img_feat, gt_bboxes, gt_labels)
+        boxes_img_infos_list = self.crop_boxes_img(img_metas, img, gt_bboxes, points, gt_labels)
+
         image = torch.cat(boxes_img_infos_list['box_img_list'], dim=0)                            # (B*, C, H, W)选择步长为8的那一层作为image_features
         # overlap_masks = torch.cat(boxes_img_infos_list['overlap_mask_list'], dim=0)               # (B * box数量, 1, H, W)
         sub_cloud = torch.cat(boxes_img_infos_list['sub_cloud_list'], dim=0)[:, :, :3]            # (B, N, 3) for x, y, z point cloud
@@ -183,7 +222,7 @@ class GenPoints(BaseModule):
 
         return losses
 
-    def crop_boxes_img(self, img_metas, img_feat, gt_bboxes_, points_, labels_):
+    def crop_boxes_img(self, img_metas, img, gt_bboxes_, points_, labels_):
         '''
         输入的图片是降采样8倍的,640,960 -> 80,120(B,C,H,W)
         '''
@@ -198,16 +237,16 @@ class GenPoints(BaseModule):
         # boxes_img_infos['foreground_label_list'] = []
         boxes_img_infos['overlap_mask_list'] = []
 
-        # 获取图片内的点云
-        batch_points, _ = get_points(points_, img_metas)
+        # 获取sample_img_id图片内的点云(背景点，前景点)
+        batch_points, _ = get_points(points_, img_metas)  # list [B, N1,N2...]，不同帧得到的点云N不同
 
         for i, per_img_meta in enumerate(img_metas):
             gt_bboxes = gt_bboxes_[i]
             points = batch_points[i]
-            img_feat = img_feat[i]
+            img = img[i]
             labels = labels_[i]
-            overlap_mask = torch.ones_like(img_feat[0:1,:,:])  # 这个是为了解决盒子重叠的问题,我这里空着，没写
-            img_feat = torch.cat([img_feat, overlap_mask],dim=0 )  #(1,C+1,H,W)
+            overlap_mask = torch.ones_like(img[0:1,:,:])  # 这个是为了解决盒子重叠的问题,我这里空着，没写
+            img = torch.cat([img, overlap_mask], dim=0)  #(1,C+1,H,W)=(1,257,H,W)
             
             box_img_list = []
             sub_cloud_list = []
@@ -219,22 +258,24 @@ class GenPoints(BaseModule):
             
             for j, gt_bbox in enumerate(gt_bboxes):
                 x_1, y_1, x_2, y_2 = gt_bbox
-                x_1, y_1, x_2, y_2 = int(np.floor(x_1)), int(np.floor(y_1)), int(np.ceil(x_2)), int(np.ceil(y_2))
+                x_1, y_1, x_2, y_2 = int(torch.floor(x_1)), int(torch.floor(y_1)), int(torch.ceil(x_2)), int(torch.ceil(y_2))
 
                 # 获取box内的点云
                 gt_mask = (((points[:, 6] > gt_bbox[0]) & (points[:, 6] < gt_bbox[2])) &
                             ((points[:, 7] > gt_bbox[1]) & (points[:, 7] < gt_bbox[3])))
-                sub_cloud2d = points[gt_mask][:, 6:8] * per_img_meta['scale_factor'][0]  # in gt box points (N, 2),图片resize了，3D对应的坐标也需要resize
+                sub_cloud2d = points[gt_mask][:, 6:8]  # in gt box points (N, 2),
                 points = points[gt_mask][:, :4]
+
+                box_img = img[x_1: x_2, y_1: y_2]
 
                 box_size = max(x_2-x_1, y_2-y_1)
                 out_shape = self.out_img_size #112
                 # 这里是对特征进行插值的,和rgb的插值区别大不？
-                box_img = F.interpolate(img_feat, scale_factor=out_shape/box_size, mode='bilinear', align_corners=True, recompute_scale_factor=False)
+                box_img = F.interpolate(img, scale_factor=out_shape/box_size, mode='bilinear', align_corners=True, recompute_scale_factor=False)
                 h, w = box_img.shape[-2:]
-                num_padding = (int(np.floor((out_shape-w)/2)), int(np.ceil((out_shape-w)/2)), int(np.floor((out_shape-h)/2)), int(np.ceil((out_shape-h)/2)))
+                num_padding = (int(torch.floor((out_shape-w)/2)), int(torch.ceil((out_shape-w)/2)), int(torch.floor((out_shape-h)/2)), int(torch.ceil((out_shape-h)/2)))
                 box_img = torch.nn.functional.pad(box_img, num_padding)     # zero-padding to make it square
-                crop_sub_cloud2d = (sub_cloud2d - np.array([x_1, y_1])) * (out_shape/box_size) + np.array([num_padding[0], num_padding[2]])
+                crop_sub_cloud2d = (sub_cloud2d - torch.tensor([x_1, y_1])) * (out_shape/box_size) + torch.tensor([num_padding[0], num_padding[2]])
 
                 box_img, overlap_mask = box_img[:, 0:-1, :, :], box_img[:, -1, :, :]
 
@@ -354,7 +395,7 @@ def get_points_img(points, img_metas):
     
     return batch_points, batch_points_mask, batch_ori_points_image, batch_ori_points_image_mask                        
 
-def get_points(points, img_metas):
+def get_points(points_, img_metas):
     '''
     获得投影到某个img上的点云
     Input: points[B,N,12]
@@ -365,24 +406,25 @@ def get_points(points, img_metas):
 
     for i, per_img_metas in enumerate(img_metas):
         sample_img_id = per_img_metas['sample_img_id']
-        points = points[i]
+        points = points_[i]
+        scale = per_img_metas['scale_factor'][0]
 
         # 1. 过滤掉没有投影到相机的点
-        mask = (points[:, 6] == 0) | (points[:, 7] == 0)  # 真值列表
+        mask = (points[:, 6] == sample_img_id) | (points[:, 7] == sample_img_id)  # 真值列表
         mask_id = torch.where(mask)[0]  # 全局索引值
         in_img_points = points[mask]
 
         # 2. 新建一个points只保存八个数据
-        new_points = in_img_points[:,8]  # (N,8)
+        new_points = in_img_points[:,:8]  # (N,8)
         for i, point in enumerate(in_img_points):
             if point[6] == sample_img_id:
-                x_0 = point[8]
-                y_0 = point[10]
-                new_points[i,6:8] = torch.tensor(x_0,y_0)          
+                x_0 = point[8] * scale
+                y_0 = point[10] * scale
+                new_points[i,6:8] = torch.tensor([x_0,y_0])          
             else:
-                x_1 = point[9]
-                y_1 = point[11]
-                new_points[i,6:8] = torch.tensor(x_1,y_1)
+                x_1 = point[9] * scale
+                y_1 = point[11] * scale
+                new_points[i,6:8] = torch.tensor([x_1,y_1])
 
         batch_points.append(new_points)
         batch_points_mask.append(mask_id)

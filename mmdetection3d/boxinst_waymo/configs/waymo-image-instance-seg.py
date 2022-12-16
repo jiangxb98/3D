@@ -75,7 +75,7 @@ train_pipeline = [
         keys=['gt_bboxes','gt_labels', 'img', 'points'],
         meta_keys=['filename','img_shape','ori_shape','pad_shape',
             'scale','scale_factor','keep_ratio','lidar2img',
-            'sample_idx','img_info','anno_info','pts_info',
+            'sample_idx','img_info','ann_info','pts_info',
             'img_norm_cfg', 'pad_fixed_size', 'pad_size_divisor',
             'sample_img_id','img_sample'],
     )

@@ -1394,7 +1394,8 @@ class CondInstMaskHead(BaseModule):
                                                                     padded_image_masks, None)    
             # 如果使用点云信息
             if self.points_enabled:
-                # points and masks 得到的points_image是1280x1920的，但对于计算量太大，所以输入时resize成1/2了
+                # points and masks 得到的points_image是1280x1920的，但对于计算量太大，图片输入时resize成1/2了，但再映射成图片依旧是1280x1920
+                # 注意在下一个生成距离相似度那里需要根据resize大小来增大步长，详情见get_bitmasks_from_boxes()
                 gt_points_image, gt_points_image_masks, gt_points_ind = self.get_gt_points_image(points, gt_bboxes, img_metas)
                 gt_points_image = gt_points_image.to(points[0].device)
                 gt_points_image_masks = gt_points_image_masks.to(points[0].device)

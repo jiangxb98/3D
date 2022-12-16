@@ -35,6 +35,8 @@ class MultiModalAutoLabel(Base3DDetector):
                 img_segm_head= None,
                 pretrained=None,
 
+                middle_encoder_pts=None,
+
                 pts_fusion_layer=None,
                 pts_backbone=None,
                 pts_neck=None,
@@ -63,6 +65,10 @@ class MultiModalAutoLabel(Base3DDetector):
             pts_test_cfg = test_cfg.pts if test_cfg else None
             pts_bbox_head.update(test_cfg=pts_test_cfg)
             self.pts_bbox_head = builder.build_head(pts_bbox_head)       
+
+        # 点云补全
+        if middle_encoder_pts:
+            self.middle_encoder_pts = builder.build_middle_encoder(middle_encoder_pts)
 
         # BoxInst
         if img_backbone:
@@ -159,7 +165,11 @@ class MultiModalAutoLabel(Base3DDetector):
     @property
     def with_img_mask_head(self):
         return hasattr(self, 'img_mask_head') and self.img_mask_head is not None    
-        
+
+    @property
+    def with_middle_encoder_pts(self):
+        return hasattr(self, 'middle_encoder_pts') and self.middle_encoder_pts is not None
+
     def extract_img_feat(self, img, img_metas):
         """Extract features of images."""
         if self.with_img_backbone and img is not None:
@@ -267,6 +277,9 @@ class MultiModalAutoLabel(Base3DDetector):
             dict: Losses of different branches.
         """
         img_feats, pts_feats = self.extract_feat(points, img=img, img_metas=img_metas)
+        # 点云
+        if self.with_middle_encoder_pts:
+            encoder_points = self.encoder_pts(points, img, img_metas, gt_bboxes, gt_labels)
         losses = dict()
         if pts_feats:
             losses_pts = self.forward_pts_train(pts_feats, gt_bboxes_3d,
@@ -510,3 +523,7 @@ class MultiModalAutoLabel(Base3DDetector):
 
             pred_bboxes = pred_bboxes.tensor.cpu().numpy()
             show_result(points, None, pred_bboxes, out_dir, file_name)
+
+    def encoder_pts(self, points, img_feats, img_metas, gt_bboxes, gt_labels):
+        pts_dict = self.middle_encoder_pts(points, img_feats[0], img_metas, gt_bboxes, gt_labels)
+        return pts_dict
