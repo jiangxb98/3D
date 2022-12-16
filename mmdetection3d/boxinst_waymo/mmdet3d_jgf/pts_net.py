@@ -226,6 +226,8 @@ class GenPoints(BaseModule):
         '''
         输入的图片是降采样8倍的,640,960 -> 80,120(B,C,H,W)
         '''
+        device = img.device
+
         boxes_img_infos = dict()
         boxes_img_infos['gt_bboxes'] = []
         boxes_img_infos['labels'] = []
@@ -246,8 +248,8 @@ class GenPoints(BaseModule):
             img = img[i]
             labels = labels_[i]
             overlap_mask = torch.ones_like(img[0:1,:,:])  # 这个是为了解决盒子重叠的问题,我这里空着，没写
-            img = torch.cat([img, overlap_mask], dim=0)  #(1,C+1,H,W)=(1,257,H,W)
-            
+            img = torch.cat([img, overlap_mask], dim=0)  #(C+1,H,W)=(4,H,W)
+
             box_img_list = []
             sub_cloud_list = []
             sub_cloud2d_list = []
@@ -266,17 +268,17 @@ class GenPoints(BaseModule):
                 sub_cloud2d = points[gt_mask][:, 6:8]  # in gt box points (N, 2),
                 points = points[gt_mask][:, :4]
 
-                box_img = img[x_1: x_2, y_1: y_2]
+                box_img = img[:, y_1: y_2, x_1: x_2]  # (C+1,H,W)
 
                 box_size = max(x_2-x_1, y_2-y_1)
                 out_shape = self.out_img_size #112
                 # 这里是对特征进行插值的,和rgb的插值区别大不？
-                box_img = F.interpolate(img, scale_factor=out_shape/box_size, mode='bilinear', align_corners=True, recompute_scale_factor=False)
+                box_img = F.interpolate(box_img.unsqueeze(dim=0), scale_factor=out_shape/box_size, mode='bilinear', align_corners=True, recompute_scale_factor=False)
                 h, w = box_img.shape[-2:]
-                num_padding = (int(torch.floor((out_shape-w)/2)), int(torch.ceil((out_shape-w)/2)), int(torch.floor((out_shape-h)/2)), int(torch.ceil((out_shape-h)/2)))
+                num_padding = (int(np.floor((out_shape-w)/2)), int(np.ceil((out_shape-w)/2)), int(np.floor((out_shape-h)/2)), int(np.ceil((out_shape-h)/2)))
                 box_img = torch.nn.functional.pad(box_img, num_padding)     # zero-padding to make it square
-                crop_sub_cloud2d = (sub_cloud2d - torch.tensor([x_1, y_1])) * (out_shape/box_size) + torch.tensor([num_padding[0], num_padding[2]])
-
+                crop_sub_cloud2d = (sub_cloud2d.cpu() - torch.tensor([x_1, y_1])) * (sub_cloud2d.cpu() - torch.tensor([x_1, y_1]))
+                crop_sub_cloud2d = crop_sub_cloud2d.to(device)
                 box_img, overlap_mask = box_img[:, 0:-1, :, :], box_img[:, -1, :, :]
 
                 # sampling the point cloud to fixed size
@@ -408,14 +410,15 @@ def get_points(points_, img_metas):
         sample_img_id = per_img_metas['sample_img_id']
         points = points_[i]
         scale = per_img_metas['scale_factor'][0]
+        device = points.device
 
         # 1. 过滤掉没有投影到相机的点
         mask = (points[:, 6] == sample_img_id) | (points[:, 7] == sample_img_id)  # 真值列表
-        mask_id = torch.where(mask)[0]  # 全局索引值
+        mask_id = torch.where(mask)[0].to(device)  # 全局索引值
         in_img_points = points[mask]
 
         # 2. 新建一个points只保存八个数据
-        new_points = in_img_points[:,:8]  # (N,8)
+        new_points = in_img_points[:,:8].to(device)  # (N,8)
         for i, point in enumerate(in_img_points):
             if point[6] == sample_img_id:
                 x_0 = point[8] * scale

@@ -524,6 +524,6 @@ class MultiModalAutoLabel(Base3DDetector):
             pred_bboxes = pred_bboxes.tensor.cpu().numpy()
             show_result(points, None, pred_bboxes, out_dir, file_name)
 
-    def encoder_pts(self, points, img_feats, img_metas, gt_bboxes, gt_labels):
-        pts_dict = self.middle_encoder_pts(points, img_feats[0], img_metas, gt_bboxes, gt_labels)
+    def encoder_pts(self, points, img, img_metas, gt_bboxes, gt_labels):
+        pts_dict = self.middle_encoder_pts(points, img, img_metas, gt_bboxes, gt_labels)
         return pts_dict
