@@ -1427,6 +1427,7 @@ class CondInstMaskHead(BaseModule):
 
         if points is not None:
             # downsampled_images = F.max_pool2d(padded_images.float(), kernel_size=stride, stride=stride, padding=0)
+            # 这里我也可以通过直接将点对应的2D坐标resize，也就是 x 1/8这样得到对应的坐标位置，那么就不需要这个mean_pool了，直接输入的就是已经降采样后的points_img
             downsampled_images = self.mean_pool(padded_images, padded_image_masks, kernel_size=stride*2, stride=stride*2)  # test
             downsampled_image_masks = F.max_pool2d(padded_image_masks.float(), kernel_size=stride*2, stride=stride*2, padding=0)
         else:
