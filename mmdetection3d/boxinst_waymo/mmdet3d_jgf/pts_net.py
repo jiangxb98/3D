@@ -138,8 +138,6 @@ class GenPoints(BaseModule):
         real_point_mask = torch.cat(boxes_img_infos_list['real_point_mask_list'], dim=0).to(device)     # (B, N), 1-realpoint; 0-padding; 2-mask; 3-jitter
         # foreground_label = torch.cat(boxes_img_infos_list['foreground_label_list'], dim=0).to(device) # (B, N), 1-foreground; 0-background; 2-unknown
         
-        
-
         pred_dict = {
             'batch_size': len(img_metas),
             'gt_nums': [len(label) for label in gt_labels],

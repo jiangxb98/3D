@@ -277,17 +277,22 @@ class MultiModalAutoLabel(Base3DDetector):
             dict: Losses of different branches.
         """
         img_feats, pts_feats = self.extract_feat(points, img=img, img_metas=img_metas)
+
         losses = dict()
-        # 点云
+
+        # 点云补全
         if self.with_middle_encoder_pts:
             encoder_points = self.encoder_pts(points, img, img_metas, gt_bboxes, gt_labels)
             loss_depth = self.middle_encoder_pts.loss(**encoder_points)
             losses.update(loss_depth)
+            enriched_points = encoder_points['enriched_foreground_logits']
+            
         if pts_feats:
             losses_pts = self.forward_pts_train(pts_feats, gt_bboxes_3d,
                                                 gt_labels_3d, img_metas,
                                                 gt_bboxes_ignore)
             losses.update(losses_pts)
+
         if img_feats:
             losses_img = self.forward_img_train(
                 img,
