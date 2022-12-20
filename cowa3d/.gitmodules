@@ -1,0 +1,6 @@
+[submodule "fsd"]
+	path = fsd
+	url = https://git.cowarobot.com/ouyangerli/fsd_plugin.git
+[submodule "cylinder3d"]
+	path = cylinder3d
+	url = https://git.cowarobot.com/chencheng/cylinder3d.git
