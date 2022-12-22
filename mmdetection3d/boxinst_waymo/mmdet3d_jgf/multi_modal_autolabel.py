@@ -17,55 +17,267 @@ from mmdet3d.models import builder
 from mmdet3d.models.builder import DETECTORS
 from mmdet3d.models.detectors.base import Base3DDetector
 
+from cowa3d_common.ops.ccl.ccl_utils import spccl, voxel_spccl, voxelized_sampling, sample
+
+def filter_almost_empty(coors, min_points):
+    new_coors, unq_inv, unq_cnt = torch.unique(coors, return_inverse=True, return_counts=True, dim=0)
+    cnt_per_point = unq_cnt[unq_inv]
+    valid_mask = cnt_per_point >= min_points
+    return valid_mask
+
+def find_connected_componets(points, batch_idx, dist):
+
+    device = points.device
+    bsz = batch_idx.max().item() + 1
+    base = 0
+    components_inds = torch.zeros_like(batch_idx) - 1
+
+    for i in range(bsz):
+        batch_mask = batch_idx == i
+        if batch_mask.any():
+            this_points = points[batch_mask]
+            dist_mat = this_points[:, None, :2] - this_points[None, :, :2] # only care about xy
+            dist_mat = (dist_mat ** 2).sum(2) ** 0.5
+            adj_mat = dist_mat < dist
+            adj_mat = adj_mat.cpu().numpy()
+            c_inds = connected_components(adj_mat, directed=False)[1]
+            c_inds = torch.from_numpy(c_inds).to(device).int() + base
+            base = c_inds.max().item() + 1
+            components_inds[batch_mask] = c_inds
+
+    assert len(torch.unique(components_inds)) == components_inds.max().item() + 1
+
+    return components_inds
+
+def find_connected_componets_single_batch(points, batch_idx, dist):
+
+    device = points.device
+
+    this_points = points
+    dist_mat = this_points[:, None, :2] - this_points[None, :, :2] # only care about xy
+    dist_mat = (dist_mat ** 2).sum(2) ** 0.5
+    # dist_mat = torch.cdist(this_points[:, :2], this_points[:, :2], p=2)
+    adj_mat = dist_mat < dist
+    adj_mat = adj_mat.cpu().numpy()
+    c_inds = connected_components(adj_mat, directed=False)[1]
+    c_inds = torch.from_numpy(c_inds).to(device).int()
+
+    return c_inds
+
+def modify_cluster_by_class(cluster_inds_list):
+    new_list = []
+    for i, inds in enumerate(cluster_inds_list):
+        cls_pad = inds.new_ones((len(inds),)) * i
+        inds = torch.cat([cls_pad[:, None], inds], 1)
+        # inds = F.pad(inds, (1, 0), 'constant', i)
+        new_list.append(inds)
+    return new_list
+
+class ClusterAssigner(torch.nn.Module):
+    ''' Generating cluster centers for each class and assign each point to cluster centers
+    '''
+
+    def __init__(
+        self,
+        cluster_voxel_size,
+        min_points,
+        point_cloud_range,
+        connected_dist,
+        class_names=['Car', 'Cyclist', 'Pedestrian'],
+    ):
+        super().__init__()
+        self.cluster_voxel_size = cluster_voxel_size
+        self.min_points = min_points
+        self.connected_dist = connected_dist
+        self.point_cloud_range = point_cloud_range
+        self.class_names = class_names
+
+    @torch.no_grad()
+    def forward(self, points_list, batch_idx_list, gt_bboxes_3d=None, gt_labels_3d=None, origin_points=None):
+        gt_bboxes_3d = None 
+        gt_labels_3d = None
+        assert self.num_classes == len(self.class_names)
+        cluster_inds_list, valid_mask_list = \
+            multi_apply(self.forward_single_class, points_list, batch_idx_list, self.class_names, origin_points)
+        cluster_inds_list = modify_cluster_by_class(cluster_inds_list)
+        return cluster_inds_list, valid_mask_list
+
+    def forward_single_class(self, points, batch_idx, class_name, origin_points):
+        batch_idx = batch_idx.int()
+
+        if isinstance(self.cluster_voxel_size, dict):
+            cluster_vsize = self.cluster_voxel_size[class_name]
+        elif isinstance(self.cluster_voxel_size, list):
+            cluster_vsize = self.cluster_voxel_size[self.class_names.index(class_name)]
+        else:
+            cluster_vsize = self.cluster_voxel_size
+
+        voxel_size = torch.tensor(cluster_vsize, device=points.device)
+        pc_range = torch.tensor(self.point_cloud_range, device=points.device)
+        coors = torch.div(points - pc_range[None, :3], voxel_size[None, :], rounding_mode='floor').int()
+        # coors = coors[:, [2, 1, 0]] # to zyx order
+        coors = torch.cat([batch_idx[:, None], coors], dim=1)
+
+        valid_mask = filter_almost_empty(coors, min_points=self.min_points)
+        if not valid_mask.any():
+            valid_mask = ~valid_mask
+            # return coors.new_zeros((3,0)), valid_mask
+
+        points = points[valid_mask]
+        batch_idx = batch_idx[valid_mask]
+        coors = coors[valid_mask]
+        # elif len(points) 
+
+        sampled_centers, voxel_coors, inv_inds = scatter_v2(points, coors, mode='avg', return_inv=True)
+
+        if isinstance(self.connected_dist, dict):
+            dist = self.connected_dist[class_name]
+        elif isinstance(self.connected_dist, list):
+            dist = self.connected_dist[self.class_names.index(class_name)]
+        else:
+            dist = self.connected_dist
+
+        if self.training:
+            cluster_inds = find_connected_componets(sampled_centers, voxel_coors[:, 0], dist)
+        else:
+            cluster_inds = find_connected_componets_single_batch(sampled_centers, voxel_coors[:, 0], dist)
+        assert len(cluster_inds) == len(sampled_centers)
+
+        cluster_inds_per_point = cluster_inds[inv_inds]
+        cluster_inds_per_point = torch.stack([batch_idx, cluster_inds_per_point], 1)
+        return cluster_inds_per_point, valid_mask
+
+class ClusterAssignerVoxelSPCCL(torch.nn.Module):
+    ''' Generating cluster centers for each class and assign each point to cluster centers
+    '''
+
+    def __init__(
+        self,
+        cluster_voxel_size,
+        min_points,
+        point_cloud_range,
+        connected_dist,
+        class_names=['Car', 'Cyclist', 'Pedestrian'],
+    ):
+        super().__init__()
+        self.cluster_voxel_size = cluster_voxel_size
+        self.min_points = min_points
+        self.connected_dist = connected_dist
+        self.point_cloud_range = point_cloud_range
+        self.class_names = class_names
+
+    @torch.no_grad()
+    def forward(self, points_list, batch_idx_list, gt_bboxes_3d=None, gt_labels_3d=None, origin_points=None):
+        gt_bboxes_3d = None 
+        gt_labels_3d = None
+        assert self.num_classes == len(self.class_names)
+        points = torch.cat(points_list).contiguous()
+        batch_id = torch.cat(batch_idx_list).to(torch.int32)
+        bsz = batch_id.max().item() + 1
+        class_id = []
+        voxel_config = []
+        for i, p in enumerate(points_list):
+            class_id.append((torch.ones(len(p), dtype=torch.int32) * i).to(points.device))
+            cluster_vsize = self.cluster_voxel_size[self.class_names[i]]
+            voxel_size = torch.tensor(cluster_vsize, device=points.device)
+            pc_range = torch.tensor(self.point_cloud_range, device=points.device)
+            voxel_config.append(torch.cat([pc_range[:3], voxel_size]))
+        class_id = torch.cat(class_id)
+        voxel_config = torch.stack(voxel_config)
+        cluster_inds = voxel_spccl(points, batch_id, class_id, voxel_config, self.min_points, bsz)
+        valid_mask = cluster_inds != -1
+        cluster_inds = torch.stack([class_id, batch_id, cluster_inds], dim=-1)  #[N, 3], (cls_id, batch_idx, cluster_id)
+        cluster_inds = cluster_inds[valid_mask]
+        valid_mask_list = []
+        for i in range(self.num_classes):
+            valid_mask_list.append(valid_mask[class_id==i])
+
+        return cluster_inds, valid_mask_list
+
 @DETECTORS.register_module()
 class MultiModalAutoLabel(Base3DDetector):
     """Base class of Multi-modality autolabel."""
 
     def __init__(self,
+                img_backbone=None,  #
+                img_neck=None,  #
+                img_bbox_head=None,  #
+                img_mask_branch=None,  #
+                img_mask_head=None,  #
+                img_segm_head= None,
+                pretrained=None,
+                img_roi_head=None,
+                img_rpn_head=None,
+                middle_encoder_pts=None,  # points completion 
+                pts_segmentor=None, #
                 pts_voxel_layer=None,
                 pts_voxel_encoder=None,
                 pts_middle_encoder=None,
-                pts_seg_head = None,
-
-                img_backbone=None,  # 
-                img_neck=None,  #
-                img_bbox_head=None,
-                img_mask_branch=None,
-                img_mask_head=None,
-                img_segm_head= None,
-                pretrained=None,
-
-                middle_encoder_pts=None,
-
-                pts_fusion_layer=None,
-                pts_backbone=None,
+                pts_backbone=None,  #
                 pts_neck=None,
-                pts_bbox_head=None,
-                img_roi_head=None,
-                img_rpn_head=None,
-                train_cfg=None,
-                test_cfg=None,
-                init_cfg=None):
+                pts_bbox_head=None, #
+                pts_roi_head=None,  # 二阶段，暂时先不用
+                pts_fusion_layer=None,            
+                train_cfg=None,  # 记住cfg是分img和pts的
+                test_cfg=None,  #
+                cluster_assigner=None,  #
+                init_cfg=None,
+                only_one_frame_label=True,
+                sweeps_num=1):
         super(MultiModalAutoLabel, self).__init__(init_cfg=init_cfg)
 
-        # Cylinder
-        if pts_voxel_layer:
+        # FSD
+        if pts_segmentor is not None:  # 
+            self.pts_segmentor = builder.build_detector(pts_segmentor)
+        
+        self.backbone = builder.build_backbone(pts_backbone)  # 
+        if pts_neck is not None:
+            self.pts_neck = builder.build_neck(pts_neck)
+        if pts_voxel_layer is not None:
             self.pts_voxel_layer = Voxelization(**pts_voxel_layer)
-        if pts_voxel_encoder:
-            self.pts_voxel_encoder = builder.build_voxel_encoder(
-                pts_voxel_encoder)
-        if pts_middle_encoder:
-            self.pts_middle_encoder = builder.build_middle_encoder(
-                pts_middle_encoder)
-        if pts_seg_head is not None:
-            self.pts_seg_head = builder.build_head(pts_seg_head)
-        if pts_bbox_head is not None:
-            pts_train_cfg = train_cfg.pts if train_cfg else None
+        if pts_voxel_encoder is not None:
+            self.pts_voxel_encoder = builder.build_voxel_encoder(pts_voxel_encoder)
+        if pts_middle_encoder is not None:
+            self.pts_middle_encoder = builder.build_middle_encoder(pts_middle_encoder)
+
+        if pts_bbox_head is not None:  # 
+            pts_train_cfg = train_cfg.pts if train_cfg.pts else None
             pts_bbox_head.update(train_cfg=pts_train_cfg)
             pts_test_cfg = test_cfg.pts if test_cfg else None
             pts_bbox_head.update(test_cfg=pts_test_cfg)
-            self.pts_bbox_head = builder.build_head(pts_bbox_head)       
+            self.pts_bbox_head = builder.build_head(pts_bbox_head)
+            self.num_classes = self.pts_bbox_head.num_classes
 
+        self.roi_head = pts_roi_head  # 
+        if pts_roi_head is not None:
+            rcnn_train_cfg = train_cfg.pts.rcnn if train_cfg.pts else None
+            pts_roi_head.update(train_cfg=rcnn_train_cfg)
+            pts_roi_head.update(test_cfg=test_cfg.pts.rcnn)
+            pts_roi_head.pretrained = pretrained
+            self.roi_head = builder.build_head(pts_roi_head)
+        # 这里有个pts_cfg配置
+        self.pts_cfg = self.train_cfg.pts if self.train_cfg.pts else self.test_cfg.pts
+        if 'radius' in cluster_assigner:
+            raise NotImplementedError
+            self.cluster_assigner = SSGAssigner(**cluster_assigner)
+        elif 'hybrid' in cluster_assigner:
+            raise NotImplementedError
+            cluster_assigner.pop('hybrid')
+            self.cluster_assigner = HybridAssigner(**cluster_assigner)
+        elif 'voxelspccl' in cluster_assigner:
+            cluster_assigner.pop('voxelspccl')
+            self.cluster_assigner = ClusterAssignerVoxelSPCCL(**cluster_assigner)
+        else:
+            self.cluster_assigner = ClusterAssigner(**cluster_assigner)
+
+        self.cluster_assigner.num_classes = self.num_classes
+        self.print_info = {}
+        self.as_rpn = pts_bbox_head.get('as_rpn', False)
+
+        self.runtime_info = dict()
+        self.only_one_frame_label = only_one_frame_label
+        self.sweeps_num = sweeps_num
+        
         # 点云补全
         if middle_encoder_pts:
             self.middle_encoder_pts = builder.build_middle_encoder(middle_encoder_pts)
@@ -75,7 +287,7 @@ class MultiModalAutoLabel(Base3DDetector):
             self.img_backbone = builder.build_backbone(img_backbone)
         if img_neck is not None:
             self.img_neck = builder.build_neck(img_neck)
-        if img_bbox_head is not None:
+        if img_bbox_head is not None:  # train_cfg.img 送入到SingleStageDetector的bbox_head
             img_train_cfg = train_cfg.img if train_cfg else None
             img_bbox_head.update(train_cfg=img_train_cfg)
             img_test_cfg = test_cfg.img if test_cfg else None
@@ -89,15 +301,11 @@ class MultiModalAutoLabel(Base3DDetector):
             self.img_segm_head = builder.build_head(img_segm_head)
         else:
             self.img_segm_head = None
-        
+    
+        # 这里也是个全局的配置
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
         
-    @property
-    def with_img_shared_head(self):
-        """bool: Whether the detector has a shared head in image branch."""
-        return hasattr(self, 'img_shared_head') and self.img_shared_head is not None
-
     @property
     def with_pts_bbox(self):
         """bool: Whether the detector has a 3D box head."""
@@ -119,11 +327,6 @@ class MultiModalAutoLabel(Base3DDetector):
         return hasattr(self, 'pts_backbone') and self.pts_backbone is not None
 
     @property
-    def with_fusion(self):
-        """bool: Whether the detector has a fusion layer."""
-        return hasattr(self, 'pts_fusion_layer') and self.fusion_layer is not None
-
-    @property
     def with_img_neck(self):
         """bool: Whether the detector has a neck in image branch."""
         return hasattr(self, 'img_neck') and self.img_neck is not None
@@ -132,39 +335,6 @@ class MultiModalAutoLabel(Base3DDetector):
     def with_pts_neck(self):
         """bool: Whether the detector has a neck in 3D detector branch."""
         return hasattr(self, 'pts_neck') and self.pts_neck is not None
-
-    @property
-    def with_img_rpn(self):
-        """bool: Whether the detector has a 2D RPN in image detector branch."""
-        return hasattr(self, 'img_rpn_head') and self.img_rpn_head is not None
-
-    @property
-    def with_img_roi_head(self):
-        """bool: Whether the detector has a RoI Head in image branch."""
-        return hasattr(self, 'img_roi_head') and self.img_roi_head is not None
-
-    @property
-    def with_voxel_encoder(self):
-        """bool: Whether the detector has a voxel encoder."""
-        return hasattr(self, 'voxel_encoder') and self.voxel_encoder is not None
-
-    @property
-    def with_middle_encoder(self):
-        """bool: Whether the detector has a middle encoder."""
-        return hasattr(self, 'middle_encoder') and self.middle_encoder is not None
-
-    @property
-    def with_pts_seg_head(self):
-        return hasattr(self, 'pts_seg_head') and self.pts_seg_head is not None
-
-    @property
-    def with_middle_encoder(self):
-        """bool: Whether the detector has a middle encoder."""
-        return hasattr(self, 'middle_encoder') and self.middle_encoder is not None
-
-    @property
-    def with_img_mask_head(self):
-        return hasattr(self, 'img_mask_head') and self.img_mask_head is not None    
 
     @property
     def with_middle_encoder_pts(self):

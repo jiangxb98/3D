@@ -1,18 +1,34 @@
 import tempfile
 from os import path as osp
 import csv
+import zlib
 import mmcv
+import tqdm
 import numpy as np
 from mmcv.utils import print_log
 from mmdet3d.datasets.builder import DATASETS
 from mmdet3d.core.bbox import get_box_type, LiDARInstance3DBoxes
 from mmdet3d.datasets.custom_3d import Custom3DDataset
 from mmdet3d.datasets.pipelines import Compose
+from mmdet3d.core.points import get_points_type
 from io import BytesIO
+from multiprocessing import Pool
+
+from waymo_open_dataset import dataset_pb2 as open_dataset
+try:
+    from waymo_open_dataset.protos import segmentation_metrics_pb2
+    from waymo_open_dataset.protos import segmentation_submission_pb2
+except ImportError:
+    raise ImportError(
+        'Please run "pip install waymo-open-dataset-tf-2-6-0==1.4.9" '
+        'to install the official devkit first.')
+
+TOP_LIDAR_ROW_NUM = 64
+TOP_LIDAR_COL_NUM = 2650
 
 
-@DATASETS.register_module(name='WaymoDataset', force=True)
-class WaymoDataset(Custom3DDataset):
+@DATASETS.register_module(name='WaymoDatasetDetSeg', force=True)
+class WaymoDatasetDetSeg(Custom3DDataset):
     CLASSES = ('Car', 'Pedestrian', 'Cyclist')
 
     def __init__(self,
@@ -422,3 +438,143 @@ class WaymoDataset(Custom3DDataset):
             all_objects_serialized.append(objects_proto.SerializeToString())
         all_objects_serialized = b''.join(all_objects_serialized)
         return all_objects_serialized
+
+    def format_one_frame_seg(self, args):
+        idx, net_out, context_info, pc_range = args
+        info = context_info[self.data_infos_seg_frames[idx]]
+        range_image_pred = np.zeros(
+            (TOP_LIDAR_ROW_NUM, TOP_LIDAR_COL_NUM, 2), dtype=np.int32)
+        range_image_pred_ri2 = np.zeros(
+            (TOP_LIDAR_ROW_NUM, TOP_LIDAR_COL_NUM, 2), dtype=np.int32)
+
+        # fill back seg labels to range image format
+        points_bytes = self.file_client.get(info['pts_info']['path'])
+        points = np.load(BytesIO(points_bytes))
+        points_indexing_row = points['lidar_row']
+        points_indexing_column = points['lidar_column']
+        points_return_idx = points['return_idx']
+        points_range_mask = np.ones_like(points_indexing_row, dtype=np.bool)
+        if pc_range is not None:
+            xyz = np.stack([points['x'].astype('f4'),
+                            points['y'].astype('f4'),
+                            points['z'].astype('f4')], axis=-1)
+            points_class = get_points_type('LIDAR')
+            xyz = points_class(xyz, points_dim=xyz.shape[-1])
+            points_range_mask = xyz.in_range_3d(pc_range).numpy()
+        points_lidar_mask = points['lidar_idx'] == 0    # 0 for open_dataset.LaserName.TOP
+
+        points_mask = points_range_mask & points_lidar_mask
+        points_indexing_row = points_indexing_row[points_mask]
+        points_indexing_column = points_indexing_column[points_mask]
+        points_return_idx = points_return_idx[points_mask]
+
+        points_lidar_in_range_mask = points_lidar_mask[points_range_mask]
+        net_out = net_out[points_lidar_in_range_mask]
+
+        assert points_indexing_row.shape[0] == net_out.shape[0]
+        assert points_indexing_row.shape[0] == points_indexing_column.shape[0]
+        range_image_pred[points_indexing_row[points_return_idx==0],
+                points_indexing_column[points_return_idx==0], 1] = net_out[:int((points_return_idx==0).sum())]
+        range_image_pred_ri2[points_indexing_row[points_return_idx==1],
+                points_indexing_column[points_return_idx==1], 1] = net_out[int((points_return_idx==0).sum()):]
+
+        segmentation_frame = segmentation_metrics_pb2.SegmentationFrame()
+        segmentation_frame.context_name = info['context']
+        segmentation_frame.frame_timestamp_micros = info['timestamp']
+        laser_semseg = open_dataset.Laser()
+        laser_semseg.name = open_dataset.LaserName.TOP
+        laser_semseg.ri_return1.segmentation_label_compressed = self.compress_array(
+            range_image_pred, is_int32=True)
+        laser_semseg.ri_return2.segmentation_label_compressed = self.compress_array(
+            range_image_pred_ri2, is_int32=True)
+        segmentation_frame.segmentation_labels.append(laser_semseg)
+
+        return segmentation_frame
+
+
+    def format_segmap(self, net_outputs, pc_range=None):
+
+        semseg_frames = self.semseg_frame_info
+        _infos_reader = mmcv.FileClient(**self.datainfo_client_args,
+                                        scope='main_process')
+        context_info = _infos_reader.client.query(
+            self.info_path, projection=['context', 'timestamp', 'pts_info'])
+        context_info = {info['_id']: info for info in context_info if info['_id'] in semseg_frames}
+
+        if self.file_client is None:
+            self.file_client = mmcv.FileClient(**self.file_client_args)
+
+
+        # for idx, net_out in enumerate(mmcv.track_iter_progress(net_outputs)):
+        seg_args = [[i, net_outputs[i], context_info, pc_range] for i in range(len(net_outputs))]
+        if self.seg_format_worker == 0:
+            segmentation_res = []
+            for idx in mmcv.track_iter_progress(range(len(net_outputs))):
+                segmentation_res.append(self.format_one_frame_seg(seg_args[idx]))
+        else:
+            # segmentation_res = mmcv.track_parallel_progress(self.format_one_frame_seg,
+            #                                                 seg_args,
+            #                                                 self.seg_format_worker)
+            with Pool(self.seg_format_worker) as p:
+                segmentation_res = list(tqdm.tqdm(p.imap(self.format_one_frame_seg, seg_args), total=len(seg_args)))
+        
+        segmentation_frame_list = segmentation_metrics_pb2.SegmentationFrameList()
+        for segmentation_frame in segmentation_res:
+            segmentation_frame_list.frames.append(segmentation_frame)
+
+        return segmentation_frame_list.SerializeToString()
+
+        
+    def compress_array(self, array: np.ndarray, is_int32: bool = False):
+        """Compress a numpy array to ZLIP compressed serialized MatrixFloat/Int32.
+
+        Args:
+            array: A numpy array.
+            is_int32: If true, use MatrixInt32, otherwise use MatrixFloat.
+
+        Returns:
+            The compressed bytes.
+        """
+        if is_int32:
+            m = open_dataset.MatrixInt32()
+        else:
+            m = open_dataset.MatrixFloat()
+        m.shape.dims.extend(list(array.shape))
+        m.data.extend(array.reshape([-1]).tolist())
+        return zlib.compress(m.SerializeToString())
+
+    def evaluate_semseg(self,
+                    results,
+                    pc_range,
+                    logger=None,
+                    pklfile_prefix=None,
+                    seg_format_worker=0,
+                    ):
+        self.seg_format_worker = seg_format_worker
+        if pklfile_prefix is None:
+            eval_tmp_dir = tempfile.TemporaryDirectory()
+            pklfile_prefix = osp.join(eval_tmp_dir.name, 'results')
+        else:
+            eval_tmp_dir = None
+
+        if 'segmap_3d' in results[0]:
+            # 0~21 -> 1~22; Ignore 0 ('TYPE_UNDEFINED') when training
+            outputs = [out['segmap_3d'].numpy() + 1 for out in results]
+        result_serialized = self.format_segmap(outputs, pc_range)
+        waymo_results_final_path = f'{pklfile_prefix}_seg.bin'
+
+        with open(waymo_results_final_path, 'wb') as f:
+            f.write(result_serialized)
+
+        import subprocess
+        ret_bytes = subprocess.check_output(
+            f'./plugins/common_plugins/core/evaluation/waymo_utils/'
+            'compute_segmentation_metrics_main '
+            f'{pklfile_prefix}_seg.bin '
+            f'/disk/deepdata/dataset/waymo_v1.4/bins/wod_semseg_val_set_gt.bin',
+            shell=True)
+        ret_texts = ret_bytes.decode('utf-8')
+        print_log(ret_texts, logger=logger)
+
+        iou_dict = dict()
+        return iou_dict

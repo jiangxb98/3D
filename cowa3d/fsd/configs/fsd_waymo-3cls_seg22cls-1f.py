@@ -279,7 +279,7 @@ model = dict(
         rpn=dict(
             use_rotate_nms=True,
             nms_pre=-1,
-            nms_thr=0.25,
+            nms_thr=0.25,  # 用了一阶段得到分数进行筛选
             score_thr=0.1, 
             min_bbox_size=0,
             max_num=500,
@@ -318,7 +318,7 @@ workflow = [('train', 2)]
 
 data = dict(
     samples_per_gpu=2,
-    workers_per_gpu=4,
+    workers_per_gpu=0,
 )
 log_config = dict(
     interval=50,
