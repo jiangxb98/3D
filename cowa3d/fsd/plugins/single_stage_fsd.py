@@ -11,7 +11,7 @@ from mmdet3d.models.builder import build_backbone, build_head, build_neck
 from mmseg.models import SEGMENTORS
 from mmdet3d.models import builder
 from mmdet3d.ops import Voxelization, furthest_point_sample
-from scipy.sparse.csgraph import connected_components  # CCL在这里
+from scipy.sparse.csgraph import connected_components
 from mmdet.core import multi_apply
 from mmdet3d.models.detectors.single_stage import SingleStage3DDetector
 from mmdet3d.models.segmentors.base import Base3DSegmentor
@@ -286,7 +286,7 @@ class VoteSegmentor(Base3DSegmentor):
         sweep_ind = None
         if self.sweeps_num > 1:
             sweep_ind = [p[:, -1] for p in points]
-            points = [p[:, :-1] for p in points]
+            points = [p[:, :-1].contiguous() for p in points]
 
         seg_pred = []
         x, pts_coors, points = self.extract_feat(points, img_metas)
@@ -495,7 +495,8 @@ class SingleStageFSD(SingleStage3DDetector):
             )
             return output_dict
         else:
-            return losses
+            output_dict = dict(rpn_losses=losses)
+            return output_dict
 
     def update_sample_results_by_mask(self, sampled_out, valid_mask_list):
         for k in sampled_out:
@@ -615,11 +616,15 @@ class SingleStageFSD(SingleStage3DDetector):
             )
             return output_dict
         else:
-            bbox_results = [
-                bbox3d2result(bboxes, scores, labels)
-                for bboxes, scores, labels in bbox_list
-            ]
-            return bbox_results
+            # bbox_results = [
+            #     bbox3d2result(bboxes, scores, labels)
+            #     for bboxes, scores, labels in bbox_list
+            # ]
+            # return bbox_results
+            output_dict = dict(
+                proposal_list=bbox_list,
+                seg_logits_full=[seg_logits_full])
+            return output_dict
 
     def aug_test(self, points, img_metas, imgs=None, rescale=False):
         """Test function with augmentaiton."""

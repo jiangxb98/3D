@@ -44,11 +44,13 @@ class FSD(SingleStageFSD):
         )
 
         # update train and test cfg here for now
-        rcnn_train_cfg = train_cfg.rcnn if train_cfg else None
-        roi_head.update(train_cfg=rcnn_train_cfg)
-        roi_head.update(test_cfg=test_cfg.rcnn)
-        roi_head.pretrained = pretrained
-        self.roi_head = builder.build_head(roi_head)
+        self.roi_head = None
+        if roi_head is not None:
+            rcnn_train_cfg = train_cfg.rcnn if train_cfg else None
+            roi_head.update(train_cfg=rcnn_train_cfg)
+            roi_head.update(test_cfg=test_cfg.rcnn)
+            roi_head.pretrained = pretrained
+            self.roi_head = builder.build_head(roi_head)
         self.num_classes = self.bbox_head.num_classes
         self.runtime_info = dict()
         self.only_one_frame_label = only_one_frame_label
@@ -65,7 +67,6 @@ class FSD(SingleStageFSD):
         gt_labels_3d = [l[l>=0] for l in gt_labels_3d]
 
         losses = {}
-        # super().表示调用夫类
         rpn_outs = super().forward_train(
             points=points,
             img_metas=img_metas,
@@ -76,6 +77,9 @@ class FSD(SingleStageFSD):
             pts_semantic_mask=pts_semantic_mask
         )
         losses.update(rpn_outs['rpn_losses'])
+
+        if self.roi_head is None:
+            return losses
 
         proposal_list = self.bbox_head.get_bboxes(
             rpn_outs['cls_logits'], rpn_outs['reg_preds'], rpn_outs['cluster_xyz'], rpn_outs['cluster_inds'], img_metas

@@ -47,7 +47,7 @@ class Voxel2PointScatterNeck(nn.Module):
             voxel_size = torch.tensor(self.voxel_size, dtype=dtype, device=device).reshape(1,3)
             pc_min_range = torch.tensor(self.point_cloud_range[:3], dtype=dtype, device=device).reshape(1,3)
             voxel_center_each_pts = (pts_coors[:, [3,2,1]].to(dtype).to(device) + 0.5) * voxel_size + pc_min_range# x y z order
-            local_xyz = points[:, :3] - voxel_center_each_pts
+            local_xyz = points[:, :3] - voxel_center_each_pts  # get local coor
             if self.normalize_local_xyz:
                 local_xyz = local_xyz / (voxel_size / 2)
 

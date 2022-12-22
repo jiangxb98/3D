@@ -135,19 +135,19 @@ class SparseClusterHeadV2(SparseClusterHead):
     def forward(self, feats, pts_xyz=None, pts_inds=None):
 
         if self.shared_mlp is not None:
-            feats = self.shared_mlp(feats)
+            feats = self.shared_mlp(feats)  # 125,1024
 
         cls_logit_list = []
         reg_pred_list = []
         for h in self.task_heads:
-            ret_dict = h(feats)
+            ret_dict = h(feats)  # center:(125,3) dim:(125,3) rot:(125,2) score:(125,)
 
             # keep consistent with v1, combine the regression prediction
             cls_logit = ret_dict['score']
             if 'vel' in ret_dict:
                 reg_pred = torch.cat([ret_dict['center'], ret_dict['dim'], ret_dict['rot'], ret_dict['vel']], dim=-1)
             else:
-                reg_pred = torch.cat([ret_dict['center'], ret_dict['dim'], ret_dict['rot']], dim=-1)
+                reg_pred = torch.cat([ret_dict['center'], ret_dict['dim'], ret_dict['rot']], dim=-1)  #(125,8)
             cls_logit_list.append(cls_logit)
             reg_pred_list.append(reg_pred)
 
@@ -161,12 +161,12 @@ class SparseClusterHeadV2(SparseClusterHead):
     @force_fp32(apply_to=('cls_logits', 'reg_preds', 'cluster_xyz'))
     def loss(
         self,
-        cls_logits,
-        reg_preds,
-        cluster_xyz,
-        cluster_inds,
-        gt_bboxes_3d,
-        gt_labels_3d,
+        cls_logits,  # list[(125,1), (125,1), (125,1)]
+        reg_preds,   # list[(125,8), (125,8), (125,8)]
+        cluster_xyz, # [125,3]
+        cluster_inds,# [125,3]
+        gt_bboxes_3d,# B, LiDARInstance3DBoxes nums
+        gt_labels_3d,# B, label_nums
         img_metas=None,
         iou_logits=None,
         gt_bboxes_ignore=None,

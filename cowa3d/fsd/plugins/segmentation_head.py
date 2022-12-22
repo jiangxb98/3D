@@ -126,12 +126,12 @@ class VoteSegHead(Base3DDecodeHead):
             if self.checkpointing:
                 output = checkpoint(self.pre_seg_conv, voxel_feat)
             else:
-                output = self.pre_seg_conv(voxel_feat)
+                output = self.pre_seg_conv(voxel_feat)  # (N,67)-->(N,128)
         if self.need_full_seg:
-            logits_full = self.cls_seg_full(output)
+            logits_full = self.cls_seg_full(output)  # (N,128)-->(N,sem_class=22) Segment 
 
-        logits = self.cls_seg(output)
-        vote_preds = self.voting(output)
+        logits = self.cls_seg(output)  # (N,128)-->(N,3) Detect 这里的函数用途重合了，最后需要放在一块
+        vote_preds = self.voting(output)  # (N,128)-->(N,3*3)，每个类别预测一个偏置，所以是3*3
 
         if return_full_logits:
             return logits, logits_full, vote_preds
@@ -155,9 +155,9 @@ class VoteSegHead(Base3DDecodeHead):
         if seg_logit_full is not None:
             seg_logit_full = seg_logit_full * self.logit_scale
         loss = dict()
-        loss['loss_sem_seg'] = self.loss_decode(seg_logit, seg_label)
+        loss['loss_sem_seg'] = self.loss_decode(seg_logit, seg_label)  #(N,3),(N,)
         if seg_logit_full is not None and seg_label_full is not None:
-            if seg_logit_full.dim() == 3:
+            if seg_logit_full.dim() == 3:  # why is there appear 3? (N,22)
                 seg_logit_full = seg_logit_full.squeeze(2)
             if self.segment_range is not None:
                 assert points.shape[0] == seg_logit_full.shape[0]
@@ -176,7 +176,7 @@ class VoteSegHead(Base3DDecodeHead):
         if self.loss_aux is not None:
             loss['loss_aux'] = self.loss_aux(seg_logit, seg_label)
 
-        vote_preds = vote_preds.reshape(-1, self.num_classes, 3)
+        vote_preds = vote_preds.reshape(-1, self.num_classes, 3)  # (N,9)-->(N,3,3)
         if not self.use_sigmoid:
             assert seg_label.max().item() == self.num_classes - 1
         else:
@@ -190,7 +190,7 @@ class VoteSegHead(Base3DDecodeHead):
         if num_valid > 0:
             assert valid_label.max().item() < self.num_classes
             assert valid_label.min().item() >= 0
-
+            # 为什么这里的indices是隔着三个取的？通过valid_label来控制选择哪一类做投票的loss计算
             indices = torch.arange(num_valid, device=valid_label.device) * self.num_classes + valid_label
             valid_vote_preds = valid_vote_preds[indices, :] #[n_valid, 3]
 
@@ -233,12 +233,12 @@ class VoteSegHead(Base3DDecodeHead):
     def forward_train(self, points, inputs, img_metas, pts_semantic_mask,
                         vote_targets, vote_mask, return_preds=False,
                         pts_semantic_mask_full=None):
-
+        # test if none
         if pts_semantic_mask_full is None:
             seg_logits, vote_preds = self.forward(inputs)
             seg_logits_full = None
         else:
-            seg_logits, seg_logits_full, vote_preds = self.forward(inputs, return_full_logits=True)
+            seg_logits, seg_logits_full, vote_preds = self.forward(inputs, return_full_logits=True)  # (N,3),(N,22),(N,3x3)
         losses = self.losses(points, seg_logits, vote_preds, pts_semantic_mask,
                              vote_targets, vote_mask, seg_logits_full, pts_semantic_mask_full)
         if return_preds:
@@ -264,7 +264,7 @@ class VoteSegHead(Base3DDecodeHead):
         bsz = len(points_list)  # batch size
         label_list = []
         vote_target_list = []
-        vote_mask_list = []  # what is vote_mask?
+        vote_mask_list = []  # what is vote_mask? only in bboxes points need to vote,in test the vote_mask is pred foregrtound and background
 
         for i in range(bsz):
 
@@ -285,8 +285,8 @@ class VoteSegHead(Base3DDecodeHead):
                 extra_width = self.train_cfg.get('extra_width', None) 
                 if extra_width is not None:
                     bboxes = bboxes.enlarged_box_hw(extra_width)
-                inbox_inds = bboxes.points_in_boxes(points).long()
-                this_label = self.get_point_labels(inbox_inds, bbox_labels)
+                inbox_inds = bboxes.points_in_boxes(points).long()  #(N,),-1表示没有在box内部
+                this_label = self.get_point_labels(inbox_inds, bbox_labels)  # (N,)
                 this_vote_target, vote_mask = self.get_vote_target(inbox_inds, points, bboxes)
 
             label_list.append(this_label)
@@ -324,7 +324,7 @@ class VoteSegHead(Base3DDecodeHead):
         return target, vote_mask
     
     def encode_vote_targets(self, delta):
-        return torch.sign(delta) * (delta.abs() ** 0.5) 
+        return torch.sign(delta) * (delta.abs() ** 0.5)# 就是开根号了，下面的decode_vote_targets又乘回来了 
     
     def decode_vote_targets(self, preds):
         return preds * preds.abs()

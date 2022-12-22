@@ -22,7 +22,7 @@ segmentor = dict(
 
     voxel_layer=dict(
         voxel_size=seg_voxel_size,
-        max_num_points=-1,
+        max_num_points=-1,  # -1表示使用动态体素化
         point_cloud_range=point_cloud_range,
         max_voxels=(-1, -1)
     ),
@@ -73,13 +73,13 @@ segmentor = dict(
         conv_cfg=dict(type='Conv1d'),
         norm_cfg=dict(type='naiveSyncBN1d'),
         act_cfg=dict(type='ReLU'),
-        loss_decode=dict(
+        loss_decode=dict(  # detect
             type='FocalLoss',
             use_sigmoid=True,
             gamma=3.0,
             alpha=0.8,
             loss_weight=1.0),
-        loss_segment=dict(
+        loss_segment=dict(  # semantic segment
             type='FocalLoss',
             use_sigmoid=True,
             gamma=3.0,
@@ -158,55 +158,55 @@ model = dict(
             norm_cfg=dict(type='LN'),
             act='relu',
         ),
-        as_rpn=True,
+        as_rpn=False,
     ),
-    roi_head=dict(
-        type='GroupCorrectionHead',
-        num_classes=num_classes,
-        roi_extractor=dict(
-             type='DynamicPointROIExtractor',
-             extra_wlh=[0.5, 0.5, 0.5],
-             max_inbox_point=256,
-             debug=False,
-        ),
-        bbox_head=dict(
-            type='FullySparseBboxHead',
-            num_classes=num_classes,
-            num_blocks=6,
-            in_channels=[213, 146, 146, 146, 146, 146], 
-            feat_channels=[[128, 128], ] * 6,
-            rel_mlp_hidden_dims=[[16, 32],] * 6,
-            rel_mlp_in_channels=[13, ] * 6,
-            reg_mlp=[512, 512],
-            cls_mlp=[512, 512],
-            mode='max',
-            xyz_normalizer=[20, 20, 4],
-            act='gelu',
-            geo_input=True,
-            with_corner_loss=True,
-            corner_loss_weight=1.0,
-            bbox_coder=dict(type='DeltaXYZWLHRBBoxCoder'),
-            norm_cfg=dict(type='LN', eps=1e-3),
-            unique_once=True,
+    # roi_head=dict(
+    #     type='GroupCorrectionHead',
+    #     num_classes=num_classes,
+    #     roi_extractor=dict(
+    #          type='DynamicPointROIExtractor',
+    #          extra_wlh=[0.5, 0.5, 0.5],
+    #          max_inbox_point=256,
+    #          debug=False,
+    #     ),
+    #     bbox_head=dict(
+    #         type='FullySparseBboxHead',
+    #         num_classes=num_classes,
+    #         num_blocks=6,
+    #         in_channels=[213, 146, 146, 146, 146, 146], 
+    #         feat_channels=[[128, 128], ] * 6,
+    #         rel_mlp_hidden_dims=[[16, 32],] * 6,
+    #         rel_mlp_in_channels=[13, ] * 6,
+    #         reg_mlp=[512, 512],
+    #         cls_mlp=[512, 512],
+    #         mode='max',
+    #         xyz_normalizer=[20, 20, 4],
+    #         act='gelu',
+    #         geo_input=True,
+    #         with_corner_loss=True,
+    #         corner_loss_weight=1.0,
+    #         bbox_coder=dict(type='DeltaXYZWLHRBBoxCoder'),
+    #         norm_cfg=dict(type='LN', eps=1e-3),
+    #         unique_once=True,
 
-            loss_bbox=dict(
-                type='L1Loss',
-                reduction='mean',
-                loss_weight=2.0),
+    #         loss_bbox=dict(
+    #             type='L1Loss',
+    #             reduction='mean',
+    #             loss_weight=2.0),
 
-            loss_cls=dict(
-                type='CrossEntropyLoss',
-                use_sigmoid=True,
-                reduction='mean',
-                loss_weight=1.0),
-            cls_dropout=0.1,
-            reg_dropout=0.1,
-        ),
-        train_cfg=None,
-        test_cfg=None,
-        pretrained=None,
-        init_cfg=None
-    ),
+    #         loss_cls=dict(
+    #             type='CrossEntropyLoss',
+    #             use_sigmoid=True,
+    #             reduction='mean',
+    #             loss_weight=1.0),
+    #         cls_dropout=0.1,
+    #         reg_dropout=0.1,
+    #     ),
+    #     train_cfg=None,
+    #     test_cfg=None,
+    #     pretrained=None,
+    #     init_cfg=None
+    # ),
 
     train_cfg=dict(
         score_thresh=seg_score_thresh,
@@ -275,7 +275,7 @@ model = dict(
     test_cfg=dict(
         score_thresh=seg_score_thresh,
         pre_voxelization_size=(0.1, 0.1, 0.1),
-        skip_rcnn=False,
+        skip_rcnn=True,
         rpn=dict(
             use_rotate_nms=True,
             nms_pre=-1,

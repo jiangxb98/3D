@@ -138,7 +138,8 @@ db_sampler = dict(
             coord_type='LIDAR',
             random_choose=False,
             with_sweep_ind=True,
-            file_client_args=det_vel_file_client_args)
+            file_client_args=det_vel_file_client_args,
+            sample_ratio=0.5)
         ])
 
 train_pipeline = [
@@ -152,7 +153,8 @@ train_pipeline = [
         coord_type='LIDAR',
         random_choose=False,
         with_sweep_ind=True,
-        file_client_args=seg_pts_client_args),
+        file_client_args=seg_pts_client_args,
+        sample_ratio=0.5),
     dict(
         type='LoadAnnos3D',
         with_bbox_3d=True,
@@ -203,7 +205,8 @@ test_pipeline = [
         coord_type='LIDAR',
         random_choose=False,
         with_sweep_ind=True,
-        file_client_args=seg_pts_client_args),
+        file_client_args=seg_pts_client_args,
+        sample_ratio=0.5),
     dict(
         type='LoadAnnos3D',
         with_bbox_3d=True,
