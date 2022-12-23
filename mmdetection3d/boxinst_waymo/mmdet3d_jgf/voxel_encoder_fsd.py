@@ -140,6 +140,7 @@ class DynamicVFE(nn.Module):
                  return_point_feats=False,
                  ):
         super(DynamicVFE, self).__init__()
+        self.in_pts_dim = in_channels
         # assert mode in ['avg', 'max']
         assert len(feat_channels) > 0
         if with_cluster_center:
@@ -369,7 +370,7 @@ class DynamicScatterVFE(DynamicVFE):
         else:
             new_coors = unq_inv_once = None
 
-        features_ls = [features]
+        features_ls = [features[:, :self.in_pts_dim]]
         origin_point_coors = features[:, :3]
         # Find distance of x, y, and z from cluster center
         if self._with_cluster_center:

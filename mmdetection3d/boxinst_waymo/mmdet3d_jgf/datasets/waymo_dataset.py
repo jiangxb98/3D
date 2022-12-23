@@ -27,8 +27,8 @@ TOP_LIDAR_ROW_NUM = 64
 TOP_LIDAR_COL_NUM = 2650
 
 
-@DATASETS.register_module(name='WaymoDatasetDetSeg', force=True)
-class WaymoDatasetDetSeg(Custom3DDataset):
+@DATASETS.register_module(name='MyWaymoDataset', force=True)
+class MyWaymoDataset(Custom3DDataset):
     CLASSES = ('Car', 'Pedestrian', 'Cyclist')
 
     def __init__(self,
@@ -80,7 +80,7 @@ class WaymoDatasetDetSeg(Custom3DDataset):
 
         # load annotations
         # 这个是所有在training/infos的数据(每帧点云)索引，如果用语义信息，就建议用语义的索引覆盖掉
-        self.data_infos = self.load_annotations(self.info_path)
+        self.data_infos = self.load_annotations(self.info_path)  # 158081
         # 这个是load所有的语义标签在OSS上的路径
         if self.load_semseg:  # 23691
             self.semseg_frame_infos = self.read_semseg_infos(self.semseg_info_path, filter_sem='semseg_info')

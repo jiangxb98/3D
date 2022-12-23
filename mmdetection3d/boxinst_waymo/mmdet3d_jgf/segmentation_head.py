@@ -119,7 +119,7 @@ class VoteSegHead(Base3DDecodeHead):
     @auto_fp16(apply_to=('voxel_feat',))
     def forward(self, voxel_feat, return_full_logits=False):
         """Forward pass.
-
+        
         """
         output = voxel_feat
         if self.pre_seg_conv is not None:
@@ -130,7 +130,7 @@ class VoteSegHead(Base3DDecodeHead):
         if self.need_full_seg:
             logits_full = self.cls_seg_full(output)  # (N,128)-->(N,sem_class=22) Segment 
 
-        logits = self.cls_seg(output)  # (N,128)-->(N,3) Detect 这里的函数用途重合了，最后需要放在一块
+        logits = self.cls_seg(output)  # (N,128)-->(N,3) Detect 
         vote_preds = self.voting(output)  # (N,128)-->(N,3*3)，每个类别预测一个偏置，所以是3*3
 
         if return_full_logits:
@@ -152,7 +152,7 @@ class VoteSegHead(Base3DDecodeHead):
         """
 
         seg_logit = seg_logit * self.logit_scale
-        if seg_logit_full is not None:
+        if seg_logit_full is not None:  # seg_logit_full表示分割
             seg_logit_full = seg_logit_full * self.logit_scale
         loss = dict()
         loss['loss_sem_seg'] = self.loss_decode(seg_logit, seg_label)  #(N,3),(N,)
@@ -168,9 +168,10 @@ class VoteSegHead(Base3DDecodeHead):
                 seg_logit_full = seg_logit_full[seg_range_mask]
                 seg_label_full = seg_label_full[seg_range_mask]
             if self.ignore_illegal_label:
-                label_mask = seg_label_full < self.num_classes_full
+                label_mask = ((seg_label_full < self.num_classes_full) & (seg_label_full != -1))
                 seg_logit_full = seg_logit_full[label_mask]
                 seg_label_full = seg_label_full[label_mask]
+                seg_label_full = seg_label_full.type(torch.long)
             loss['loss_sem_seg_full_focal'] = self.loss_segment(seg_logit_full, seg_label_full)
             loss['loss_sem_seg_full_lova'] = self.loss_lova(F.softmax(seg_logit_full, dim=1), seg_label_full)
         if self.loss_aux is not None:
@@ -233,7 +234,7 @@ class VoteSegHead(Base3DDecodeHead):
     def forward_train(self, points, inputs, img_metas, pts_semantic_mask,
                         vote_targets, vote_mask, return_preds=False,
                         pts_semantic_mask_full=None):
-        # test if none
+        # 
         if pts_semantic_mask_full is None:
             seg_logits, vote_preds = self.forward(inputs)
             seg_logits_full = None

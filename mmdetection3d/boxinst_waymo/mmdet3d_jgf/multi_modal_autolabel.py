@@ -169,7 +169,7 @@ class VoteSegmentor(Base3DSegmentor):
         else:
             # this branch only used in SST-based FSD 
             voxel_feats_reorder = self.reorder(x['voxel_feats'], voxel_info['shuffle_inds'], voxel_info['voxel_keep_inds'], padding) #'not consistent with voxel_coors any more'
-
+        # 注意这里out[1]这个索引的意义
         out = self.decode_neck(batch_points, coors, voxel_feats_reorder, voxel2point_inds, padding)
 
         return out, coors, batch_points
@@ -479,6 +479,10 @@ class MultiModalAutoLabel(Base3DDetector):
                 sweeps_num=1):
         super(MultiModalAutoLabel, self).__init__(init_cfg=init_cfg)
 
+        # 这里也是个全局的配置
+        self.train_cfg = train_cfg
+        self.test_cfg = test_cfg
+        
         # FSD
         if pts_segmentor is not None:  # 
             self.pts_segmentor = builder.build_detector(pts_segmentor)
@@ -501,7 +505,7 @@ class MultiModalAutoLabel(Base3DDetector):
             self.pts_bbox_head = builder.build_head(pts_bbox_head)
             self.num_classes = self.pts_bbox_head.num_classes
 
-        self.roi_head = pts_roi_head  # 
+        self.pts_roi_head = pts_roi_head  # 
         if pts_roi_head is not None:
             rcnn_train_cfg = train_cfg.pts.rcnn if train_cfg.pts else None
             pts_roi_head.update(train_cfg=rcnn_train_cfg)
@@ -555,9 +559,7 @@ class MultiModalAutoLabel(Base3DDetector):
         else:
             self.img_segm_head = None
     
-        # 这里也是个全局的配置
-        self.train_cfg = train_cfg
-        self.test_cfg = test_cfg
+
         
     @property
     def with_pts_bbox(self):
@@ -613,20 +615,33 @@ class MultiModalAutoLabel(Base3DDetector):
             img_feats = self.img_neck(img_feats)
         return img_feats
 
-    def extract_pts_feat(self, pts, img_feats, img_metas):
-        """Extract features of points."""
-        # If no points backbone return None
+    def extract_pts_feat(self, points, pts_feats, pts_cluster_inds, img_metas, center_preds):
+        """Extract features from points."""
         if not self.with_pts_backbone:
             return None
         if not self.with_pts_bbox:
-            return None
-        return None
+            return None      
+        cluster_xyz, _, inv_inds = scatter_v2(center_preds, pts_cluster_inds, mode='avg', return_inv=True)
+
+        f_cluster = points[:, :3] - cluster_xyz[inv_inds]
+
+        out_pts_feats, cluster_feats, out_coors = self.pts_backbone(points, pts_feats, pts_cluster_inds, f_cluster)
+        out_dict = dict(
+            cluster_feats=cluster_feats,
+            cluster_xyz=cluster_xyz,
+            cluster_inds=out_coors
+        )
+        if self.as_rpn:
+            out_dict['cluster_pts_feats'] = out_pts_feats
+            out_dict['cluster_pts_xyz'] = points
+
+        return out_dict
 
     def extract_feat(self, points, img, img_metas):
         """Extract features from images and points."""
-        img_feats = self.extract_img_feat(img, img_metas)
-        pts_feats = self.extract_pts_feat(points, img_feats, img_metas)
-        return (img_feats, pts_feats)
+        img_feats = self.extract_img_feat(img, img_metas)  # FPN 5layers, img_feats=5*[B,C,new_H,new_W]
+        # pts_feats = self.extract_pts_feat(points, img_feats, img_metas)
+        return (img_feats, None)
 
     @torch.no_grad()
     @force_fp32()
@@ -666,8 +681,11 @@ class MultiModalAutoLabel(Base3DDetector):
                       img=None, # need
                       proposals=None,
                       gt_bboxes_ignore=None,
-                      runtime_info=None,
-                      pts_semantic_mask=None):
+                      runtime_info=dict(),
+                      pts_semantic_mask=None,
+                      pts_instance_mask=None,
+                      gt_semantic_seg=None,
+                      ):
         """Forward training function.
 
         Args:
@@ -709,8 +727,8 @@ class MultiModalAutoLabel(Base3DDetector):
             losses.update(loss_depth)
             enriched_points = encoder_points['enriched_foreground_logits']
 
-        # 4. FSD-Points Branch     
-        if pts_feats:
+        # 4. FSD-Points Branch    
+        if self.with_pts_backbone:
             rpn_outs = self.forward_pts_train(points,
                                                 img_metas,
                                                 gt_bboxes_3d,
@@ -720,35 +738,35 @@ class MultiModalAutoLabel(Base3DDetector):
                                                 pts_semantic_mask)
             losses.update(rpn_outs['rpn_losses'])
 
-            if self.roi_head is None:
-                return losses
+            # fsd second stage
+            if self.pts_roi_head is not None:
 
-            proposal_list = self.bbox_head.get_bboxes(
-                rpn_outs['cls_logits'], rpn_outs['reg_preds'], rpn_outs['cluster_xyz'], rpn_outs['cluster_inds'], img_metas
-            )
+                proposal_list = self.pts_bbox_head.get_bboxes(
+                    rpn_outs['cls_logits'], rpn_outs['reg_preds'], rpn_outs['cluster_xyz'], rpn_outs['cluster_inds'], img_metas
+                )
 
-            assert len(proposal_list) == len(gt_bboxes_3d)
+                assert len(proposal_list) == len(gt_bboxes_3d)
 
-            pts_xyz, pts_feats, pts_batch_inds = self.prepare_multi_class_roi_input(
-                rpn_outs['all_input_points'],
-                rpn_outs['valid_pts_feats'],
-                rpn_outs['seg_feats'],
-                rpn_outs['pts_mask'],
-                rpn_outs['pts_batch_inds'],
-                rpn_outs['valid_pts_xyz']
-            )
+                pts_xyz, pts_feats, pts_batch_inds = self.prepare_multi_class_roi_input(
+                    rpn_outs['all_input_points'],
+                    rpn_outs['valid_pts_feats'],
+                    rpn_outs['seg_feats'],
+                    rpn_outs['pts_mask'],
+                    rpn_outs['pts_batch_inds'],
+                    rpn_outs['valid_pts_xyz']
+                )
 
-            roi_losses = self.roi_head.forward_train(
-                pts_xyz,
-                pts_feats,
-                pts_batch_inds,
-                img_metas,
-                proposal_list,
-                gt_bboxes_3d,
-                gt_labels_3d,
-            )
+                roi_losses = self.pts_roi_head.forward_train(
+                    pts_xyz,
+                    pts_feats,
+                    pts_batch_inds,
+                    img_metas,
+                    proposal_list,
+                    gt_bboxes_3d,
+                    gt_labels_3d,
+                )
 
-            losses.update(roi_losses)
+                losses.update(roi_losses)
 
         # 2. Image Branch
         if img_feats:
@@ -782,7 +800,7 @@ class MultiModalAutoLabel(Base3DDetector):
         gt_bboxes_3d = [b[l>=0] for b, l in zip(gt_bboxes_3d, gt_labels_3d)]
         gt_labels_3d = [l[l>=0] for l in gt_labels_3d]
 
-        seg_out_dict = self.segmentor(points=points, img_metas=img_metas, gt_bboxes_3d=gt_bboxes_3d, gt_labels_3d=gt_labels_3d, as_subsegmentor=True,
+        seg_out_dict = self.pts_segmentor(points=points, img_metas=img_metas, gt_bboxes_3d=gt_bboxes_3d, gt_labels_3d=gt_labels_3d, as_subsegmentor=True,
                                     pts_semantic_mask=pts_semantic_mask)
 
         seg_feats = seg_out_dict['seg_feats']
@@ -799,7 +817,7 @@ class MultiModalAutoLabel(Base3DDetector):
             batch_idx=seg_out_dict['batch_idx'],
             vote_offsets=seg_out_dict['offsets'].detach(),
         )
-        if self.cfg.get('pre_voxelization_size', None) is not None:
+        if self.pts_cfg.get('pre_voxelization_size', None) is not None:
             dict_to_sample = self.pre_voxelize(dict_to_sample)
         sampled_out = self.sample(dict_to_sample, dict_to_sample['vote_offsets'], gt_bboxes_3d, gt_labels_3d) # per cls list in sampled_out
 
@@ -820,20 +838,20 @@ class MultiModalAutoLabel(Base3DDetector):
         assert len(pts_cluster_inds) == len(points) == len(pts_feats)
         losses['num_fg_points'] = torch.ones((1,), device=points.device).float() * len(points)
 
-        extracted_outs = self.extract_feat(points, pts_feats, pts_cluster_inds, img_metas, combined_out['center_preds'])
+        extracted_outs = self.extract_pts_feat(points, pts_feats, pts_cluster_inds, img_metas, combined_out['center_preds'])
         cluster_feats = extracted_outs['cluster_feats']
         cluster_xyz = extracted_outs['cluster_xyz']
         cluster_inds = extracted_outs['cluster_inds'] # [class, batch, groups]
 
         assert (cluster_inds[:, 0]).max().item() < self.num_classes
 
-        outs = self.bbox_head(cluster_feats, cluster_xyz, cluster_inds)
+        outs = self.pts_bbox_head(cluster_feats, cluster_xyz, cluster_inds)
         loss_inputs = (outs['cls_logits'], outs['reg_preds']) + (cluster_xyz, cluster_inds) + (gt_bboxes_3d, gt_labels_3d, img_metas)
-        det_loss = self.bbox_head.loss(
+        det_loss = self.pts_bbox_head.loss(
             *loss_inputs, iou_logits=outs.get('iou_logits', None), gt_bboxes_ignore=gt_bboxes_ignore)
         
-        if hasattr(self.bbox_head, 'print_info'):
-            self.print_info.update(self.bbox_head.print_info)
+        if hasattr(self.pts_bbox_head, 'print_info'):
+            self.print_info.update(self.pts_bbox_head.print_info)
         losses.update(det_loss)
         losses.update(self.print_info)
 
@@ -1063,7 +1081,7 @@ class MultiModalAutoLabel(Base3DDetector):
         batch_idx = data_dict['batch_idx']
         points = data_dict['seg_points']
 
-        voxel_size = torch.tensor(self.cfg.pre_voxelization_size, device=batch_idx.device)
+        voxel_size = torch.tensor(self.pts_cfg.pre_voxelization_size, device=batch_idx.device)
         pc_range = torch.tensor(self.cluster_assigner.point_cloud_range, device=points.device)
         coors = torch.div(points[:, :3] - pc_range[None, :3], voxel_size[None, :], rounding_mode='floor').long()
         coors = coors[:, [2, 1, 0]] # to zyx order
@@ -1134,3 +1152,79 @@ class MultiModalAutoLabel(Base3DDetector):
         cat_feats = cat_feats[inds]
 
         return all_points, cat_feats, all_batch_inds
+
+    def sample(self, dict_to_sample, offset, gt_bboxes_3d=None, gt_labels_3d=None):
+
+        if self.pts_cfg.get('group_sample', False):
+            return self.group_sample(dict_to_sample, offset)
+
+        cfg = self.train_cfg.pts if self.training else self.test_cfg.pts
+
+        seg_logits = dict_to_sample['seg_logits']
+        assert (seg_logits < 0).any() # make sure no sigmoid applied
+
+        if seg_logits.size(1) == self.num_classes:
+            seg_scores = seg_logits.sigmoid()
+        else:
+            raise NotImplementedError
+
+        offset = offset.reshape(-1, self.num_classes, 3)
+        seg_points = dict_to_sample['seg_points'][:, :3]
+        fg_mask_list = [] # fg_mask of each cls
+        center_preds_list = [] # fg_mask of each cls
+
+        batch_idx = dict_to_sample['batch_idx']
+        batch_size = batch_idx.max().item() + 1
+        for cls in range(self.num_classes):
+            cls_score_thr = cfg['score_thresh'][cls]
+
+            fg_mask = self.get_fg_mask(seg_scores, seg_points, cls, batch_idx, gt_bboxes_3d, gt_labels_3d)
+
+            if len(torch.unique(batch_idx[fg_mask])) < batch_size:
+                one_random_pos_per_sample = self.get_sample_beg_position(batch_idx, fg_mask)
+                fg_mask[one_random_pos_per_sample] = True # at least one point per sample
+
+            fg_mask_list.append(fg_mask)
+
+            this_offset = offset[fg_mask, cls, :]
+            this_points = seg_points[fg_mask, :]
+            this_centers = this_points + this_offset
+            center_preds_list.append(this_centers)
+
+
+        output_dict = {}
+        for data_name in dict_to_sample:
+            data = dict_to_sample[data_name]
+            cls_data_list = []
+            for fg_mask in fg_mask_list:
+                cls_data_list.append(data[fg_mask])
+
+            output_dict[data_name] = cls_data_list
+        output_dict['fg_mask_list'] = fg_mask_list
+        output_dict['center_preds'] = center_preds_list
+
+        return output_dict
+
+    def update_sample_results_by_mask(self, sampled_out, valid_mask_list):
+        for k in sampled_out:
+            old_data = sampled_out[k]
+            if len(old_data[0]) == len(valid_mask_list[0]) or 'fg_mask' in k:
+                if 'fg_mask' in k:
+                    new_data_list = []
+                    for data, mask in zip(old_data, valid_mask_list):
+                        new_data = data.clone()
+                        new_data[data] = mask
+                        assert new_data.sum() == mask.sum()
+                        new_data_list.append(new_data)
+                    sampled_out[k] = new_data_list
+                else:
+                    new_data_list = [data[mask] for data, mask in zip(old_data, valid_mask_list)]
+                    sampled_out[k] = new_data_list
+        return sampled_out
+
+    def combine_classes(self, data_dict, name_list):
+        out_dict = {}
+        for name in data_dict:
+            if name in name_list:
+                out_dict[name] = torch.cat(data_dict[name], 0)
+        return out_dict

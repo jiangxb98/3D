@@ -60,6 +60,7 @@ class SIR(nn.Module):
     
     def forward(self, points, features, coors, f_cluster=None):
         # points=(N,) coors = (cls_id, batch_idx, cluster_id)
+        points=points[:, :5]
         if self.unique_once:
             new_coors, unq_inv = torch.unique(coors, return_inverse=True, return_counts=False, dim=0)  # new_coors(N_clusters, 3),unq_inv(N,)
         else:

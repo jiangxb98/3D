@@ -2,7 +2,7 @@ import time
 from mmcv.fileio import FileClient, BaseStorageBackend
 
 
-@FileClient.register_backend('MINIO')
+@FileClient.register_backend('MyMINIO')
 class MINIOBackend(BaseStorageBackend):
     def __init__(self, bucket, path_mapping=None, scope=None, proxy=None,
                  **minio_cfg):

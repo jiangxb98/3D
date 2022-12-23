@@ -8,8 +8,8 @@ from mmdet3d.datasets.builder import PIPELINES
 import torch
 from mmdet.core import BitmapMasks, PolygonMasks
 
-@PIPELINES.register_module()
-class LoadPoints(object):
+@PIPELINES.register_module(force=True)
+class MyLoadPoints(object):
     def __init__(self,
                  coord_type,
                  remove_close=False,
@@ -57,8 +57,8 @@ class LoadPoints(object):
         return repr_str
 
 
-@PIPELINES.register_module()
-class LoadSweeps(LoadPoints):
+@PIPELINES.register_module(force=True)
+class MyLoadSweeps(MyLoadPoints):
     def __init__(self,
                  sweeps_num,
                  coord_type,
@@ -67,7 +67,7 @@ class LoadSweeps(LoadPoints):
                  remove_close=False,
                  random_choose=True,
                  test_mode=False):
-        super(LoadSweeps, self).__init__(
+        super(MyLoadSweeps, self).__init__(
             coord_type, remove_close, file_client_args)
         self.sweeps_num = sweeps_num
         self.pad_empty_sweeps = pad_empty_sweeps
@@ -130,12 +130,12 @@ class LoadSweeps(LoadPoints):
         return f'{self.__class__.__name__}(sweeps_num={self.sweeps_num})'
 
 
-@PIPELINES.register_module()
-class LoadAnnos3D(LoadAnnotations3D):
+@PIPELINES.register_module(force=True)
+class MyLoadAnnos3D(LoadAnnotations3D):
     def __init__(self,
                  *args,
                  **kwargs):
-        super(LoadAnnos3D, self).__init__(*args, **kwargs)
+        super(MyLoadAnnos3D, self).__init__(*args, **kwargs)
 
     def _load_masks_3d(self, results):
         # instance mask and semantic have the same path
@@ -152,8 +152,7 @@ class LoadAnnos3D(LoadAnnotations3D):
 
     def _load_semantic_seg_3d(self, results):
         pts_semantic_mask_path = results['ann_info']['pts_semantic_mask_path']
-        pts_semantic_mask_loader = results['ann_info'][
-            'pts_semantic_mask_loader']
+        pts_semantic_mask_loader = results['ann_info']['pts_semantic_mask_loader']
 
         if self.file_client is None:
             self.file_client = mmcv.FileClient(**self.file_client_args)

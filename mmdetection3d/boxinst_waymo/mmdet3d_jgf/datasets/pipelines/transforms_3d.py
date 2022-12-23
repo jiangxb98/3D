@@ -80,8 +80,8 @@ class ObjectSample(object):
         repr_str += f' sample_groups={self.sampler_cfg.sample_groups}'
         return repr_str
 
-@PIPELINES.register_module()
-class FilterBoxWithMinimumPointsCount:
+@PIPELINES.register_module(force=True)
+class MyFilterBoxWithMinimumPointsCount:
     def __init__(self, num_points=1):
         self.num_points = num_points
 
@@ -569,7 +569,7 @@ class FilterLabelImage:
             tmp_3d = np.zeros(semantic_seg_3d.shape)
             for i in range(len(self.seg_3d_class)):
                 tmp_3d += np.where(semantic_seg_3d==self.seg_3d_class[i], i+1, 0)
-            results['pts_semantic_seg'] = tmp_3d - 1
+            results['pts_semantic_mask'] = tmp_3d - 1
         if self.with_seg_3d:
             seg_ind_3d = (tmp_3d-1 >= 0)
             results['pts_instance_mask'] = results['pts_instance_mask'] * seg_ind_3d

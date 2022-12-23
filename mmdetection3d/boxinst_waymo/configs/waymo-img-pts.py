@@ -1,13 +1,13 @@
-dataset_type = 'WaymoDataset'
+dataset_type = 'MyWaymoDataset'
 
 file_client_args = dict(
-    backend='MINIO',
+    backend='MyMINIO',
     bucket='ai-waymo-v1.4',
     endpoint='ossapi.cowarobot.cn:9000',
     secure=False)
 
 datainfo_client_args = dict(
-    backend='MONGODB',
+    backend='MyMONGODB',
     database='ai-waymo-v1_4',
     host='mongodb://root:root@172.16.100.41:27017/')
 
@@ -22,11 +22,18 @@ img_norm_cfg = dict(
 
 train_pipeline = [
     dict(
-        type='LoadPoints',
+        type='MyLoadPoints',
         coord_type='LIDAR',
         file_client_args=file_client_args),
     dict(
         type='LoadImages',
+        file_client_args=file_client_args),
+    dict(
+        type='MyLoadAnnos3D',
+        with_bbox_3d=True,
+        with_label_3d=True,
+        with_seg_3d=True,
+        with_mask_3d=True,
         file_client_args=file_client_args),
     dict(
         type='LoadAnnos',
@@ -40,8 +47,8 @@ train_pipeline = [
         filter_calss_name=class_names,
         with_mask=True,
         with_seg=True,
-        with_mask_3d=False,
-        with_seg_3d=False),
+        with_mask_3d=True,
+        with_seg_3d=True),
     dict(
         type='ResizeMultiViewImage',
         # Target size (w, h)
@@ -73,7 +80,8 @@ train_pipeline = [
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', 
-        keys=['img', 'points', 'gt_bboxes', 'gt_labels', 'gt_semantic_seg', 'gt_masks'],
+        keys=['img', 'gt_bboxes', 'gt_labels', 'gt_semantic_seg', 'gt_masks', 
+              'points', 'gt_bboxes_3d', 'gt_labels_3d', 'pts_semantic_mask'],
         meta_keys=['filename','img_shape','ori_shape','pad_shape',
             'scale','scale_factor','keep_ratio','lidar2img',
             'sample_idx','img_info','ann_info','pts_info',
@@ -84,7 +92,7 @@ train_pipeline = [
 
 test_pipeline = [
     dict(
-        type='LoadPoints',
+        type='MyLoadPoints',
         coord_type='LIDAR',
         file_client_args=file_client_args),
     dict(
@@ -123,7 +131,7 @@ test_pipeline = [
 
 eval_pipeline = [
     dict(
-        type='LoadPoints',
+        type='MyLoadPoints',
         coord_type='LIDAR',
         file_client_args=file_client_args),
     dict(

@@ -2,7 +2,7 @@ from mmcv.fileio import FileClient, BaseStorageBackend
 import time
 
 
-@FileClient.register_backend('MONGODB')
+@FileClient.register_backend('MyMONGODB')
 class MONGODBBackend(BaseStorageBackend):
     def __init__(self, database, path_mapping=None, scope=None,
                  **mongodb_cfg):
@@ -56,7 +56,7 @@ class MONGODBBackend(BaseStorageBackend):
                     # ret = [o['_id'] for o in self.get_collection(collection).find() if filter_sem in o.keys()]
                     ret = []
                     data_ = self.get_collection(collection)
-                    for i in range(100):
+                    for i in range(170):
                         o = data_.find_one({'_id':i})
                         if filter_sem in o.keys():
                             ret.append(o['_id'])
