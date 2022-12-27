@@ -56,7 +56,7 @@ class MONGODBBackend(BaseStorageBackend):
                     # ret = [o['_id'] for o in self.get_collection(collection).find() if filter_sem in o.keys()]
                     ret = []
                     data_ = self.get_collection(collection)
-                    for i in range(170):
+                    for i in range(180):
                         o = data_.find_one({'_id':i})
                         if filter_sem in o.keys():
                             ret.append(o['_id'])

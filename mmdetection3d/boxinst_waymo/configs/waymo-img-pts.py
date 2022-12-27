@@ -81,7 +81,7 @@ train_pipeline = [
     dict(
         type='Collect3D', 
         keys=['img', 'gt_bboxes', 'gt_labels', 'gt_semantic_seg', 'gt_masks', 
-              'points', 'gt_bboxes_3d', 'gt_labels_3d', 'pts_semantic_mask'],
+              'points', 'gt_bboxes_3d', 'gt_labels_3d', 'pts_semantic_mask'],  # 
         meta_keys=['filename','img_shape','ori_shape','pad_shape',
             'scale','scale_factor','keep_ratio','lidar2img',
             'sample_idx','img_info','ann_info','pts_info',
@@ -188,6 +188,7 @@ data = dict(
         semseg_classes=class_names,
         semseg_info_path='training/infos',  # semantic and instance same path
         # 2d segmentation
+        load_img=True,
         load_panseg=True,  
         panseg_classes = class_names,
         panseg_info_path='training/infos',  # semantic and instance same path
@@ -196,7 +197,7 @@ data = dict(
         type=dataset_type,
         info_path='training/infos',
         datainfo_client_args=datainfo_client_args,
-        pipeline=test_pipeline,
+        pipeline=eval_pipeline,
         modality=input_modality,
         classes=class_names,
         test_mode=True,
@@ -206,7 +207,8 @@ data = dict(
         semseg_classes=class_names,
         semseg_info_path='training/infos',
         # 2d segmentation
-        load_panseg=True,
+        load_img=True,
+        load_panseg=False,
         panseg_classes = class_names,
         panseg_info_path='training/infos',),
     test=dict(
@@ -223,6 +225,7 @@ data = dict(
         semseg_classes=class_names,
         semseg_info_path='training/infos',
         # 2d segmentation
+        load_img=True,
         load_panseg=False,  
         panseg_classes = class_names,
         panseg_info_path='training/infos',))        

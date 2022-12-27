@@ -519,7 +519,8 @@ class SparseClusterHeadV2(SparseClusterHead):
         if self.as_rpn:
             cfg = self.train_cfg.rpn if self.training else self.test_cfg.rpn
         else:
-            cfg = self.test_cfg
+            # cfg = self.test_cfg.rpn
+            cfg = self.train_cfg.rpn if self.training else self.test_cfg.rpn
 
         assert cls_logits.size(0) == reg_preds.size(0) == cluster_xyz.size(0)
         assert cls_logits.size(1) == len(self.tasks[task_id]['class_names'])
@@ -555,8 +556,9 @@ class SparseClusterHeadV2(SparseClusterHead):
         scores = torch.cat([scores, padding], dim=1)
 
         score_thr = cfg.get('score_thr', 0)
+        max_num = cfg.get('max_num', 500)
         results = box3d_multiclass_nms(bboxes, bboxes_for_nms,
-                                    scores, score_thr, cfg.max_num,
+                                    scores, score_thr, max_num,
                                     cfg)
 
         out_bboxes, out_scores, out_labels = results

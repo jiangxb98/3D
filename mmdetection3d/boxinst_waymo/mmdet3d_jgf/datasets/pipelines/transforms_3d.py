@@ -565,14 +565,16 @@ class FilterLabelImage:
                 results['gt_masks'][i] = BitmapMasks(new_mask, new_mask.shape[1], new_mask.shape[2])
         
         if self.with_mask_3d:
-            semantic_seg_3d = results['pts_semantic_mask'].squeeze()
-            tmp_3d = np.zeros(semantic_seg_3d.shape)
-            for i in range(len(self.seg_3d_class)):
-                tmp_3d += np.where(semantic_seg_3d==self.seg_3d_class[i], i+1, 0)
-            results['pts_semantic_mask'] = tmp_3d - 1
+            if 'pts_semantic_mask' in results.keys():
+                semantic_seg_3d = results['pts_semantic_mask'].squeeze()
+                tmp_3d = np.zeros(semantic_seg_3d.shape)
+                for i in range(len(self.seg_3d_class)):
+                    tmp_3d += np.where(semantic_seg_3d==self.seg_3d_class[i], i+1, 0)
+                results['pts_semantic_mask'] = tmp_3d - 1
         if self.with_seg_3d:
-            seg_ind_3d = (tmp_3d-1 >= 0)
-            results['pts_instance_mask'] = results['pts_instance_mask'] * seg_ind_3d
+            if 'pts_instance_mask' in results.keys():
+                seg_ind_3d = (tmp_3d-1 >= 0)
+                results['pts_instance_mask'] = results['pts_instance_mask'] * seg_ind_3d
 
         return results
 

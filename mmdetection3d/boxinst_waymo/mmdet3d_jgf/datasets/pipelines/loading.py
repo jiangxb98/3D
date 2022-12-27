@@ -163,7 +163,7 @@ class MyLoadAnnos3D(LoadAnnotations3D):
         return results
 
 
-@PIPELINES.register_module()
+@PIPELINES.register_module(force=True)
 class LoadImages(object):
     def __init__(self,
                  to_float32=False,
@@ -214,7 +214,7 @@ class LoadImages(object):
         return repr_str       
 
 
-@PIPELINES.register_module()
+@PIPELINES.register_module(force=True)
 class LoadAnnos(LoadAnnotations):
     def __init__(self, *arg, **kwargs):
         super(LoadAnnos, self).__init__(*arg, **kwargs)

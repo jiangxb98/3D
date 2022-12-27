@@ -13,7 +13,7 @@ seg_score_thresh = (0.3, 0.25, 0.25)
 
 pts_segmentor = dict(
     type='VoteSegmentor',
-    need_full_seg=True,
+    need_full_seg=False,
 
     voxel_layer=dict(
         voxel_size=seg_voxel_size,
@@ -87,7 +87,7 @@ pts_segmentor = dict(
         loss_vote=dict(
             type='L1Loss',
             loss_weight=1.0),
-        need_full_seg=True,
+        need_full_seg=False,
         num_classes_full=len(semantic_class_names),
         ignore_illegal_label=True,
         # segment_range=[-50, 50],
@@ -101,11 +101,11 @@ pts_segmentor = dict(
     ),
 )
 
-
 # model settings
 model = dict(
     type='MultiModalAutoLabel',
-
+    with_pts_branch=True,
+    with_img_branch=False,
     img_backbone=dict(
         type='ResNet',
         depth=50,
@@ -389,7 +389,7 @@ model = dict(
                 min_bbox_size=0,
                 max_num=500,
             ),
-            return_mode=2)     # 0: both, 1: detection, 2: segmentation
+            return_mode=1)     # 0: both, 1: detection, 2: segmentation
         ),
 
     cluster_assigner=dict(
@@ -411,20 +411,16 @@ model = dict(
 
 
 # runtime settings
-runner = dict(type='EpochBasedRunner', max_epochs=12)  # NOTE
-evaluation = dict(interval=12)
-workflow = [('train', 2)]
+runner = dict(type='EpochBasedRunner', max_epochs=1)  # NOTE
+workflow = [('train', 1),('val', 1)]
 
-data = dict(
-    samples_per_gpu=2,
-    workers_per_gpu=0,
-)
 log_config = dict(
     interval=50,
     hooks=[
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerFullHook')
     ])
+    
 custom_hooks = [
     #dict(type='SegmentationDataSwitchHook', ratio=1),
     dict(type='DisableAugmentationHook', num_last_epochs=1, skip_type_keys=('ObjectSample', 'RandomFlip3D', 'GlobalRotScaleTrans')),

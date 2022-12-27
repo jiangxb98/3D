@@ -637,9 +637,9 @@ class CondInstBoxHead(AnchorFreeHead):
         return labels, bbox_targets, min_area_inds
 
     def simple_test(self, feats, top_module, img_metas, rescale=False):
-        outs = self.forward(feats, top_module)
+        outs = self.forward(feats, top_module)  # 返回的是个长度为4的元组：cls_score, bbox_preds, centernesses, param_preds 每个底下是五个fpn layers
         results_list = self.get_bboxes(*outs, img_metas, rescale=rescale)
-        return results_list
+        return results_list  # 框的两个角位置坐标+得分，所属类别，滤波器参数(N,233)，box在当前level的位置(N,2)，所属的layer索引
 
     @force_fp32(apply_to=('cls_scores', 'bbox_preds', 'centernesses'))
     def get_bboxes(self,
@@ -672,7 +672,7 @@ class CondInstBoxHead(AnchorFreeHead):
         Returns:
             list[tuple[Tensor, Tensor]]: Each item in result_list is 2-tuple.
                 The first item is an (n, 5) tensor, where 5 represent
-                (tl_x, tl_y, br_x, br_y, score) and the score between 0 and 1.
+                (tl_x, tl_y, br_x, br_y, score) and the score between 0 and 1. 表示左上角坐标和右下角坐标，最后一个是得分
                 The shape of the second tensor in the tuple is (n,), and
                 each element represents the class label of the corresponding
                 box.
