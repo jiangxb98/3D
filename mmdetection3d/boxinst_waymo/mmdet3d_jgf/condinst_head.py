@@ -1500,12 +1500,13 @@ class CondInstMaskHead(BaseModule):
             gt_bboxes = gt_bboxes_[i]/per_img_metas['scale_factor'][0]
 
             # 1. 过滤掉没有投影到相机的点
-            mask = (points[:, 6] == sample_img_id) | (points[:, 7] == sample_img_id)  # 真值列表
-            mask_id = torch.where(mask)[0]  # 全局索引值
-            in_img_points = points[mask]
+            in_img_points = points
+            # mask = (points[:, 6] == sample_img_id) | (points[:, 7] == sample_img_id)  # 真值列表
+            mask_id = torch.where(points)[0]  # 全局索引值
+            # in_img_points = points[mask]
 
             # 2. 得到在2D bboxes内的点
-            gt_mask = torch.tensor([False for _ in range(mask_id.shape[0])]).to(mask.device)
+            gt_mask = torch.tensor([False for _ in range(points.shape[0])]).to(points.device)
             # 使用所有的gt bbox进行筛选
             for gt_bbox in gt_bboxes:
                 # if 0 cam 8,10（列，行）

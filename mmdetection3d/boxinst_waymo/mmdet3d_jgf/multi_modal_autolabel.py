@@ -573,8 +573,13 @@ class MultiModalAutoLabel(Base3DDetector):
             gt_labels_3d = [l[l>=0] for l in gt_labels_3d]
         losses = dict()
 
+        points = self.filter_points(img_metas=img_metas, points=points)
+
         # 1. Image Branch
         if self.with_img_backbone and self.with_img_branch:
+            # 过滤掉没有投影到相机的点
+            points = self.filter_points(img_metas=img_metas, points_=points)
+
             img_feats = self.extract_img_feat(img=img, img_metas=img_metas)
             losses_img = self.forward_img_train(
                 img,
@@ -1505,6 +1510,17 @@ class MultiModalAutoLabel(Base3DDetector):
         gathered_score = torch.stack(score_per_group, dim=1)
         assert gathered_score.size(1) == len(group_lens)
         return  gathered_score
+
+    def filter_points(self, img_metas, points):
+
+        for i, per_img_metas in enumerate(img_metas):
+            sample_img_id = per_img_metas['sample_img_id']
+            # 过滤掉没有投影到相机的点
+            mask = (points[i][:, 6] == sample_img_id) | (points[i][:, 7] == sample_img_id)  # 真值列表
+            # mask_id = torch.where(mask)[0]  # 全局索引值
+            points[i] = points[i][mask]
+
+        return points
 
 
 class ClusterAssigner(torch.nn.Module):

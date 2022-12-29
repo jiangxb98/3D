@@ -312,15 +312,25 @@ class MyWaymoDataset(Custom3DDataset):
 
         return waymo_results_final_path
 
-    def evaluate(self,
-                 results,
-                 metric=None,
-                 logger=None,
-                 pklfile_prefix=None,
-                 submission_prefix=None,
-                 show=False,
-                 out_dir=None,
-                 pipeline=None):
+    def evaluate(self, results, **kwargs):
+
+        if kwargs.get('eval_seg', False):
+            print(self.evaluate_seg(results, **kwargs))
+
+        if kwargs.get('eval_det', False):
+            print(self.evaluate_det(results, **kwargs))
+
+    def evaluate_det(self,
+                    results,
+                    metric=None,
+                    logger=None,
+                    pklfile_prefix=None,
+                    submission_prefix=None,
+                    show=False,
+                    out_dir=None,
+                    pipeline=None,
+                    *args,
+                    **kwargs):
         waymo_root = 'data/waymo/waymo_format'
         if pklfile_prefix is None:
             eval_tmp_dir = tempfile.TemporaryDirectory()
@@ -330,7 +340,7 @@ class MyWaymoDataset(Custom3DDataset):
         self.format_results(results, pklfile_prefix)
         import subprocess
         ret_bytes = subprocess.check_output(
-            f'./research/refactor/core/evaluation/waymo_utils/'
+            f'/root/3D/waymo_utils/'
             'compute_detection_metrics_main '
             f'{pklfile_prefix}.bin '
             f'/disk/deepdata/dataset/waymo_v1.2/waymo_format/gt.bin',
@@ -385,6 +395,42 @@ class MyWaymoDataset(Custom3DDataset):
         if show or out_dir:
             raise NotImplementedError
         return ap_dict
+
+    def evaluate_seg(self,
+                    results,
+                    pc_range,
+                    logger=None,
+                    pklfile_prefix=None,
+                    seg_format_worker=0,
+                    ):
+        self.seg_format_worker = seg_format_worker
+        if pklfile_prefix is None:
+            eval_tmp_dir = tempfile.TemporaryDirectory()
+            pklfile_prefix = osp.join(eval_tmp_dir.name, 'results')
+        else:
+            eval_tmp_dir = None
+
+        if 'segmap_3d' in results[0]:
+            # 0~21 -> 1~22; Ignore 0 ('TYPE_UNDEFINED') when training
+            outputs = [out['segmap_3d'].numpy() + 1 for out in results]
+        result_serialized = self.format_segmap(outputs, pc_range)
+        waymo_results_final_path = f'{pklfile_prefix}_seg.bin'
+
+        with open(waymo_results_final_path, 'wb') as f:
+            f.write(result_serialized)
+
+        import subprocess
+        ret_bytes = subprocess.check_output(
+            f'/root/3D/waymo_utils/'
+            'compute_segmentation_metrics_main '
+            f'{pklfile_prefix}_seg.bin '
+            f'/disk/deepdata/dataset/waymo_v1.4/bins/wod_semseg_val_set_gt.bin',
+            shell=True)
+        ret_texts = ret_bytes.decode('utf-8')
+        print_log(ret_texts, logger=logger)
+
+        iou_dict = dict()
+        return iou_dict
 
     def bbox2result_waymo(self, net_outputs):
         from waymo_open_dataset import label_pb2
@@ -491,7 +537,6 @@ class MyWaymoDataset(Custom3DDataset):
 
         return segmentation_frame
 
-
     def format_segmap(self, net_outputs, pc_range=None):
 
         semseg_frames = self.semseg_frame_info
@@ -503,7 +548,6 @@ class MyWaymoDataset(Custom3DDataset):
 
         if self.file_client is None:
             self.file_client = mmcv.FileClient(**self.file_client_args)
-
 
         # for idx, net_out in enumerate(mmcv.track_iter_progress(net_outputs)):
         seg_args = [[i, net_outputs[i], context_info, pc_range] for i in range(len(net_outputs))]
@@ -523,8 +567,7 @@ class MyWaymoDataset(Custom3DDataset):
             segmentation_frame_list.frames.append(segmentation_frame)
 
         return segmentation_frame_list.SerializeToString()
-
-        
+       
     def compress_array(self, array: np.ndarray, is_int32: bool = False):
         """Compress a numpy array to ZLIP compressed serialized MatrixFloat/Int32.
 
@@ -543,38 +586,3 @@ class MyWaymoDataset(Custom3DDataset):
         m.data.extend(array.reshape([-1]).tolist())
         return zlib.compress(m.SerializeToString())
 
-    def evaluate_semseg(self,
-                    results,
-                    pc_range,
-                    logger=None,
-                    pklfile_prefix=None,
-                    seg_format_worker=0,
-                    ):
-        self.seg_format_worker = seg_format_worker
-        if pklfile_prefix is None:
-            eval_tmp_dir = tempfile.TemporaryDirectory()
-            pklfile_prefix = osp.join(eval_tmp_dir.name, 'results')
-        else:
-            eval_tmp_dir = None
-
-        if 'segmap_3d' in results[0]:
-            # 0~21 -> 1~22; Ignore 0 ('TYPE_UNDEFINED') when training
-            outputs = [out['segmap_3d'].numpy() + 1 for out in results]
-        result_serialized = self.format_segmap(outputs, pc_range)
-        waymo_results_final_path = f'{pklfile_prefix}_seg.bin'
-
-        with open(waymo_results_final_path, 'wb') as f:
-            f.write(result_serialized)
-
-        import subprocess
-        ret_bytes = subprocess.check_output(
-            f'./plugins/common_plugins/core/evaluation/waymo_utils/'
-            'compute_segmentation_metrics_main '
-            f'{pklfile_prefix}_seg.bin '
-            f'/disk/deepdata/dataset/waymo_v1.4/bins/wod_semseg_val_set_gt.bin',
-            shell=True)
-        ret_texts = ret_bytes.decode('utf-8')
-        print_log(ret_texts, logger=logger)
-
-        iou_dict = dict()
-        return iou_dict

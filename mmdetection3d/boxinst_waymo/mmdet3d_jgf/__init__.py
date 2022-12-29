@@ -8,7 +8,7 @@ from .condinst_head import *
 from .multi_modal_autolabel import *
 
 # Points Completion
-from .pts_net import *
+from .pts_gen_net import *
 
 # Points Branch-FSD
 

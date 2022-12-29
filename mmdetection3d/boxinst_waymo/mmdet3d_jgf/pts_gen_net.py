@@ -370,9 +370,10 @@ def get_points_img(points, img_metas):
         points = points[i]
 
         # 1. 过滤掉没有投影到相机的点
-        mask = (points[:, 6] == 0) | (points[:, 7] == 0)  # 真值列表
-        mask_id = torch.where(mask)[0]  # 全局索引值
-        in_img_points = points[mask]
+        in_img_points = points
+        # mask = (points[:, 6] == 0) | (points[:, 7] == 0)  # 真值列表
+        mask_id = torch.where(points)[0]  # 全局索引值
+        # in_img_points = points[mask]
 
         # 2. 新建 点云映射图
         ori_points_image = torch.zeros((1280,1920,3),dtype=torch.float)
@@ -422,9 +423,10 @@ def get_points(points_, img_metas):
         device = points.device
 
         # 1. 过滤掉没有投影到相机的点
-        mask = (points[:, 6] == sample_img_id) | (points[:, 7] == sample_img_id)  # 真值列表
-        mask_id = torch.where(mask)[0].to(device)  # 全局索引值
-        in_img_points = points[mask]
+        in_img_points = points
+        # mask = (points[:, 6] == sample_img_id) | (points[:, 7] == sample_img_id)  # 真值列表
+        mask_id = torch.where(points)[0].to(device)  # 全局索引值
+        # in_img_points = points[mask]
 
         # 2. 新建一个points只保存八个数据
         new_points = in_img_points[:,:8].to(device)  # (N,8)

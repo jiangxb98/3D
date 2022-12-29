@@ -32,23 +32,23 @@ train_pipeline = [
         type='MyLoadAnnos3D',
         with_bbox_3d=True,
         with_label_3d=True,
-        with_seg_3d=True,
-        with_mask_3d=True,
+        with_seg_3d=False,
+        with_mask_3d=False,
         file_client_args=file_client_args),
     dict(
         type='LoadAnnos',
         with_bbox=True,
         with_label=True,
-        with_mask=True,
-        with_seg=True,
+        with_mask=False,
+        with_seg=False,
         file_client_args=file_client_args),
     dict(
         type='FilterLabelImage',
         filter_calss_name=class_names,
-        with_mask=True,
-        with_seg=True,
-        with_mask_3d=True,
-        with_seg_3d=True),
+        with_mask=False,
+        with_seg=False,
+        with_mask_3d=False,
+        with_seg_3d=False),
     dict(
         type='ResizeMultiViewImage',
         # Target size (w, h)
@@ -80,8 +80,8 @@ train_pipeline = [
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', 
-        keys=['img', 'gt_bboxes', 'gt_labels', 'gt_semantic_seg', 'gt_masks', 
-              'points', 'gt_bboxes_3d', 'gt_labels_3d', 'pts_semantic_mask'],  # 
+        keys=['img', 'gt_bboxes', 'gt_labels',  # 'gt_semantic_seg', 'gt_masks',
+              'points', 'gt_bboxes_3d', 'gt_labels_3d', ],  # 'pts_semantic_mask'
         meta_keys=['filename','img_shape','ori_shape','pad_shape',
             'scale','scale_factor','keep_ratio','lidar2img',
             'sample_idx','img_info','ann_info','pts_info',
@@ -184,12 +184,12 @@ data = dict(
         load_interval=1,
         datainfo_client_args=datainfo_client_args,
         # 3d segmentation
-        load_semseg=True,
+        load_semseg=False,
         semseg_classes=class_names,
         semseg_info_path='training/infos',  # semantic and instance same path
         # 2d segmentation
         load_img=True,
-        load_panseg=True,  
+        load_panseg=False,  
         panseg_classes = class_names,
         panseg_info_path='training/infos',  # semantic and instance same path
         pipeline=train_pipeline),
@@ -230,5 +230,6 @@ data = dict(
         panseg_classes = class_names,
         panseg_info_path='training/infos',))        
 
-evaluation = dict(interval=1, pipeline=eval_pipeline, pc_range=point_cloud_range)
+evaluation = dict(interval=1, pipeline=eval_pipeline, 
+                  pc_range=point_cloud_range, eval_seg=False, eval_det=True)
 

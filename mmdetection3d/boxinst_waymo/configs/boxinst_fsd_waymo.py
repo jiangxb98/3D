@@ -412,6 +412,7 @@ model = dict(
 
 # runtime settings
 runner = dict(type='EpochBasedRunner', max_epochs=1)  # NOTE
+# runner = dict(type='IterBasedRunner', max_iters=1)
 workflow = [('train', 1),('val', 1)]
 
 log_config = dict(
