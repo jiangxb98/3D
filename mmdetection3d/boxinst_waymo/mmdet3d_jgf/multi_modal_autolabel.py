@@ -199,7 +199,7 @@ class VoteSegmentor(Base3DSegmentor):
                       gt_labels_3d,
                       as_subsegmentor=False,
                       pts_semantic_mask=None,
-                      ):
+                      gt_box_type=1):
         # if self.tanh_dims is not None:
         #     for p in points:
         #         p[:, self.tanh_dims] = torch.tanh(p[:, self.tanh_dims])
@@ -215,7 +215,7 @@ class VoteSegmentor(Base3DSegmentor):
             # multiple frames with label
             sweep_ind = None
         
-        labels, vote_targets, vote_mask = self.segmentation_head.get_targets(points, gt_bboxes_3d, gt_labels_3d)
+        labels, vote_targets, vote_mask = self.segmentation_head.get_targets(points, gt_bboxes_3d, gt_labels_3d, gt_box_type, img_metas)
 
         neck_out, pts_coors, points = self.extract_feat(points, img_metas)
 
@@ -358,7 +358,8 @@ class MultiModalAutoLabel(Base3DDetector):
                 cluster_assigner=None,  #
                 init_cfg=None,
                 only_one_frame_label=True,
-                sweeps_num=1):
+                sweeps_num=1,
+                gt_box_type=1):  # 1 is 3d, 2 is 2d
         super(MultiModalAutoLabel, self).__init__(init_cfg=init_cfg)
 
         # 这里也是个全局的配置
@@ -367,6 +368,8 @@ class MultiModalAutoLabel(Base3DDetector):
         
         self.with_pts_branch = with_pts_branch
         self.with_img_branch = with_img_branch
+        self.gt_box_type = gt_box_type
+
         # FSD
         if pts_segmentor is not None:  # 
             self.pts_segmentor = builder.build_detector(pts_segmentor)
@@ -602,13 +605,23 @@ class MultiModalAutoLabel(Base3DDetector):
 
         # 3. FSD-Points Branch    
         if self.with_pts_backbone and self.with_pts_branch:
+            # 如果不存在3d box而且使用3d分支，那么使用2d box做监督
+            if gt_bboxes_3d is None:
+                gt_bboxes_3d = gt_bboxes
+                gt_labels_3d = gt_labels
+                self.gt_box_type = 2  # box 1 is 3d box, 2 is 2d box
+            if self.gt_box_type == 2:
+                gt_bboxes_3d = gt_bboxes
+                gt_labels_3d = gt_labels
+                points = self.scale_cp_cor(points, img_metas) # 提前将3d对应的2d坐标，根据输入图片resize大小来放缩
             rpn_outs = self.forward_pts_train(points,
                                                 img_metas,
                                                 gt_bboxes_3d,
                                                 gt_labels_3d,
                                                 gt_bboxes_ignore,
                                                 runtime_info,
-                                                pts_semantic_mask)
+                                                pts_semantic_mask,
+                                                )
             losses.update(rpn_outs['rpn_losses'])
 
             # fsd second stage
@@ -650,7 +663,8 @@ class MultiModalAutoLabel(Base3DDetector):
                           gt_labels_3d,
                           gt_bboxes_ignore=None,
                           runtime_info=None,
-                          pts_semantic_mask=None):
+                          pts_semantic_mask=None,
+                          ):
         """Forward function for point cloud branch.
         """
 
@@ -660,7 +674,7 @@ class MultiModalAutoLabel(Base3DDetector):
         gt_labels_3d = [l[l>=0] for l in gt_labels_3d]
 
         seg_out_dict = self.pts_segmentor(points=points, img_metas=img_metas, gt_bboxes_3d=gt_bboxes_3d, gt_labels_3d=gt_labels_3d, as_subsegmentor=True,
-                                    pts_semantic_mask=None)  # 不分割pts_semantic_mask=pts_semantic_mask
+                                    pts_semantic_mask=pts_semantic_mask, gt_box_type=self.gt_box_type)
 
         seg_feats = seg_out_dict['seg_feats']
         if self.train_cfg.get('detach_segmentor', False):
@@ -707,7 +721,7 @@ class MultiModalAutoLabel(Base3DDetector):
         outs = self.pts_bbox_head(cluster_feats, cluster_xyz, cluster_inds)
         loss_inputs = (outs['cls_logits'], outs['reg_preds']) + (cluster_xyz, cluster_inds) + (gt_bboxes_3d, gt_labels_3d, img_metas)
         det_loss = self.pts_bbox_head.loss(
-            *loss_inputs, iou_logits=outs.get('iou_logits', None), gt_bboxes_ignore=gt_bboxes_ignore)
+            *loss_inputs, iou_logits=outs.get('iou_logits', None), gt_bboxes_ignore=gt_bboxes_ignore, gt_box_type=self.gt_box_type)
         
         if hasattr(self.pts_bbox_head, 'print_info'):
             self.print_info.update(self.pts_bbox_head.print_info)
@@ -1302,7 +1316,7 @@ class MultiModalAutoLabel(Base3DDetector):
         batch_size = batch_idx.max().item() + 1
         for cls in range(self.num_classes):
             cls_score_thr = cfg['score_thresh'][cls]
-
+            # 在 test 阶段返回的是 得分＞阈值的点
             fg_mask = self.get_fg_mask(seg_scores, seg_points, cls, batch_idx, gt_bboxes_3d, gt_labels_3d)
 
             if len(torch.unique(batch_idx[fg_mask])) < batch_size:
@@ -1520,6 +1534,14 @@ class MultiModalAutoLabel(Base3DDetector):
             # mask_id = torch.where(mask)[0]  # 全局索引值
             points[i] = points[i][mask]
 
+        return points
+
+    def scale_cp_cor(self, points, img_metas):
+
+        for i, per_img_metas in enumerate(img_metas):
+            scale = img_metas[i]['scale_factor'][0]
+            if points[i].shape[1] == 12:
+                points[i][:,8:12] = points[i][:,8:12] * scale
         return points
 
 

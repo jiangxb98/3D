@@ -106,6 +106,7 @@ model = dict(
     type='MultiModalAutoLabel',
     with_pts_branch=True,
     with_img_branch=False,
+    gt_box_type=1, # 1 is 3d,2 is 2d
     img_backbone=dict(
         type='ResNet',
         depth=50,

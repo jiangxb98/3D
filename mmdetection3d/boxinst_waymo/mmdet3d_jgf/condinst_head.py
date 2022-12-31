@@ -1512,11 +1512,11 @@ class CondInstMaskHead(BaseModule):
                 # if 0 cam 8,10（列，行）
                 gt_mask_0 = (((in_img_points[:, 8] > gt_bbox[0]) & (in_img_points[:, 8] < gt_bbox[2])) &
                             ((in_img_points[:, 10] > gt_bbox[1]) & (in_img_points[:, 10] < gt_bbox[3])) &
-                            (in_img_points[:, 6] == 0))
+                            (in_img_points[:, 6] == sample_img_id))
                 # if 1 cam 9,11
                 gt_mask_1 = (((in_img_points[:, 9] > gt_bbox[0]) & (in_img_points[:, 9] < gt_bbox[2])) &
                             ((in_img_points[:, 11] > gt_bbox[1]) & (in_img_points[:, 11] < gt_bbox[3])) &
-                            (in_img_points[:, 7] == 0))
+                            (in_img_points[:, 7] == sample_img_id))
                 gt_mask = gt_mask_0 | gt_mask_1 | gt_mask
             # 得到id全局索引值
             gt_points_ind = mask_id[gt_mask]
@@ -1531,7 +1531,7 @@ class CondInstMaskHead(BaseModule):
                 if point[6] == sample_img_id:
                     x_0 = point[8]
                     y_0 = point[10]
-                    ori_points_image[int(y_0), int(x_0)] = torch.tensor([point[0], point[1], point[2]])
+                    ori_points_image[int(y_0), int(x_0)] = torch.tensor([point[0], point[1], point[2]])  # int(a) == torch.floor(a)
                     ori_points_image_mask[int(y_0), int(x_0)] = 1
                 if point[7] == sample_img_id:
                     x_1 = point[9]

@@ -13,7 +13,7 @@ from mmdet3d.core import AssignResult, PseudoSampler, xywhr2xyxyr, \
 
 from mmdet.models import HEADS
 
-from .utils import build_mlp 
+from .utils import build_mlp, get_in_2d_box_inds
 
 
 @HEADS.register_module()
@@ -367,13 +367,18 @@ class SparseClusterHead(BaseModule):
                       cluster_xyz,
                       gt_bboxes_3d,
                       gt_labels_3d,
+                      gt_box_type,
+                      img_metas=None,
                       ):
         """Generate targets of vote head for single batch.
 
         """
 
         num_cluster = cluster_xyz.size(0)
-        num_gts = gt_bboxes_3d.tensor.size(0)
+        if gt_box_type == 1:
+            num_gts = gt_bboxes_3d.tensor.size(0)
+        elif gt_box_type == 2:
+            num_gts = gt_bboxes_3d.size(0)
 
         # initialize as all background
         assigned_gt_inds = cluster_xyz.new_zeros((num_cluster, ), dtype=torch.long) # 0 indicates assign to backgroud
@@ -386,14 +391,17 @@ class SparseClusterHead(BaseModule):
                 assigned_gt_inds[:] = 0
             return AssignResult(
                 num_gts, assigned_gt_inds, None, labels=assigned_labels)
-
-        enlarged_box = self.enlarge_gt_bboxes(gt_bboxes_3d)
-        inbox_inds = enlarged_box.points_in_boxes(cluster_xyz).long()
-        inbox_inds = self.dist_constrain(inbox_inds, cluster_xyz, gt_bboxes_3d, gt_labels_3d)
+        if gt_box_type == 1:
+            enlarged_box = self.enlarge_gt_bboxes(gt_bboxes_3d)  # 没修改
+            inbox_inds = enlarged_box.points_in_boxes(cluster_xyz).long()  # 
+        elif gt_box_type == 2:
+            enlarged_box = self.enlarge_gt_bboxes(gt_bboxes_3d)  # 没修改
+            inbox_inds = get_in_2d_box_inds(cluster_xyz, enlarged_box, img_metas)
+        inbox_inds = self.dist_constrain(inbox_inds, cluster_xyz, gt_bboxes_3d, gt_labels_3d)  # 目前没作用
         pos_cluster_mask = inbox_inds > -1
 
         if pos_cluster_mask.any():
-            assigned_gt_inds[pos_cluster_mask] = inbox_inds[pos_cluster_mask] + 1
+            assigned_gt_inds[pos_cluster_mask] = inbox_inds[pos_cluster_mask] + 1  # +1 原因是 0表示背景
             assigned_labels[pos_cluster_mask] = gt_labels_3d[inbox_inds[pos_cluster_mask]]
 
         return AssignResult(num_gts, assigned_gt_inds, None, labels=assigned_labels)

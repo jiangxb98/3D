@@ -33,22 +33,23 @@ class BasePointBBoxCoder(BaseBBoxCoder):
         self.num_classes = num_classes
         self.max_num = max_num
 
-    def encode(self, bboxes, base_points):
+    def encode(self, bboxes, base_points, gt_box_type):
         """
         Get regress target given bboxes and corresponding base_points
+        base_points 是聚类中心
         """
         dtype = bboxes.dtype
         device = bboxes.device
 
         assert bboxes.size(1) in (7, 9, 10), f'bboxes shape: {bboxes.shape}'
         assert bboxes.size(0) == base_points.size(0)
-        xyz = bboxes[:,:3]
+        xyz = bboxes[:,:3]  # gt box bottom center
         dims = bboxes[:, 3:6]
         yaw = bboxes[:, 6:7]
 
         log_dims = (dims + self.EPS).log()
 
-        dist2center = xyz - base_points
+        dist2center = xyz - base_points  # 这里没有除以对角线，因为这是center-based，没有anchor
 
         delta = dist2center # / self.window_size_meter
         reg_target = torch.cat([delta, log_dims, yaw.sin(), yaw.cos()], dim=1)

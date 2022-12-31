@@ -159,17 +159,17 @@ class SparseClusterHeadV2(SparseClusterHead):
         return outs
 
     @force_fp32(apply_to=('cls_logits', 'reg_preds', 'cluster_xyz'))
-    def loss(
-        self,
+    def loss(self,
         cls_logits,  # list[(125,1), (125,1), (125,1)]
         reg_preds,   # list[(125,8), (125,8), (125,8)]
         cluster_xyz, # [125,3]
         cluster_inds,# [125,3]
-        gt_bboxes_3d,# B, LiDARInstance3DBoxes nums
-        gt_labels_3d,# B, label_nums
+        gt_bboxes_3d,# [B, LiDARInstance3DBoxes nums]
+        gt_labels_3d,# [B, label_nums]
         img_metas=None,
         iou_logits=None,
         gt_bboxes_ignore=None,
+        gt_box_type=1
         ):
         assert isinstance(cls_logits, list)
         assert isinstance(reg_preds, list)
@@ -185,6 +185,8 @@ class SparseClusterHeadV2(SparseClusterHead):
                 gt_bboxes_3d,
                 gt_labels_3d,
                 iou_logits,
+                gt_box_type,
+                img_metas,
             )
             all_task_losses.update(losses_this_task)
         return all_task_losses
@@ -200,10 +202,12 @@ class SparseClusterHeadV2(SparseClusterHead):
             gt_bboxes_3d,
             gt_labels_3d,
             iou_logits=None,
+            gt_box_type=1,
+            img_metas=None,
         ):
 
-
-        gt_bboxes_3d, gt_labels_3d = self.modify_gt_for_single_task(gt_bboxes_3d, gt_labels_3d, task_id)
+        # 用处？过滤得到改类别下的box和label
+        gt_bboxes_3d, gt_labels_3d = self.modify_gt_for_single_task(gt_bboxes_3d, gt_labels_3d, task_id, gt_box_type)
         
         if iou_logits is not None and iou_logits.dtype == torch.float16:
             iou_logits = iou_logits.to(torch.float)
@@ -216,7 +220,7 @@ class SparseClusterHeadV2(SparseClusterHead):
         num_total_samples = len(reg_preds)
 
         num_task_classes = len(self.tasks[task_id]['class_names'])
-        targets = self.get_targets(num_task_classes, cluster_xyz, cluster_batch_idx, gt_bboxes_3d, gt_labels_3d, reg_preds)
+        targets = self.get_targets(num_task_classes, cluster_xyz, cluster_batch_idx, gt_bboxes_3d, gt_labels_3d, reg_preds, gt_box_type, img_metas)
         labels, label_weights, bbox_targets, bbox_weights, iou_labels = targets
         assert (label_weights == 1).all(), 'for now'
 
@@ -297,16 +301,16 @@ class SparseClusterHeadV2(SparseClusterHead):
 
         return losses_with_task_id
 
-    def modify_gt_for_single_task(self, gt_bboxes_3d, gt_labels_3d, task_id):
+    def modify_gt_for_single_task(self, gt_bboxes_3d, gt_labels_3d, task_id, gt_box_type):
         out_bboxes_list, out_labels_list = [], []
         for gts_b, gts_l in zip(gt_bboxes_3d, gt_labels_3d):
-            out_b, out_l = self.modify_gt_for_single_task_single_sample(gts_b, gts_l, task_id)
+            out_b, out_l = self.modify_gt_for_single_task_single_sample(gts_b, gts_l, task_id, gt_box_type)
             out_bboxes_list.append(out_b)
             out_labels_list.append(out_l)
         return out_bboxes_list, out_labels_list
     
-    def modify_gt_for_single_task_single_sample(self, gt_bboxes_3d, gt_labels_3d, task_id):
-        assert gt_bboxes_3d.tensor.size(0) == gt_labels_3d.size(0)
+    def modify_gt_for_single_task_single_sample(self, gt_bboxes_3d, gt_labels_3d, task_id, gt_box_type):
+        # assert gt_bboxes_3d.tensor.size(0) == gt_labels_3d.size(0)
         if gt_labels_3d.size(0) == 0:
             return gt_bboxes_3d, gt_labels_3d
         assert (gt_labels_3d >= 0).all() # I don't want -1 in gt_labels_3d
@@ -320,7 +324,10 @@ class SparseClusterHeadV2(SparseClusterHead):
             this_cls_mask = gt_labels_3d == cls_id
             out_gt_bboxes_list.append(gt_bboxes_3d[this_cls_mask])
             out_labels_list.append(gt_labels_3d.new_ones(this_cls_mask.sum()) * i)
-        out_gt_bboxes_3d = gt_bboxes_3d.cat(out_gt_bboxes_list)
+        if gt_box_type == 1:
+            out_gt_bboxes_3d = gt_bboxes_3d.cat(out_gt_bboxes_list)
+        elif gt_box_type == 2:
+            out_gt_bboxes_3d = torch.cat(out_gt_bboxes_list, dim=0)
         out_labels = torch.cat(out_labels_list, dim=0)
         if len(out_labels) > 0:
             assert out_labels.max().item() < num_classes_this_task
@@ -330,9 +337,11 @@ class SparseClusterHeadV2(SparseClusterHead):
                     num_task_classes,
                     cluster_xyz,
                     batch_idx,
-                    gt_bboxes_3d,
+                    gt_bboxes_3d,  # list
                     gt_labels_3d,
-                    reg_preds=None):
+                    reg_preds=None,
+                    gt_box_type=1,
+                    img_metas=None,):
         batch_size = len(gt_bboxes_3d)
         cluster_xyz_list = self.split_by_batch(cluster_xyz, batch_idx, batch_size)
 
@@ -342,7 +351,8 @@ class SparseClusterHeadV2(SparseClusterHead):
             reg_preds_list = [None,] * len(cluster_xyz_list)
 
         num_task_class_list = [num_task_classes,] * len(cluster_xyz_list)
-        target_list_per_sample = multi_apply(self.get_targets_single, num_task_class_list, cluster_xyz_list, gt_bboxes_3d, gt_labels_3d, reg_preds_list)
+        gt_box_type_list = [gt_box_type for i in range(batch_size)]
+        target_list_per_sample = multi_apply(self.get_targets_single, num_task_class_list, cluster_xyz_list, gt_bboxes_3d, gt_labels_3d, reg_preds_list, gt_box_type_list, img_metas)
         targets = [self.combine_by_batch(t, batch_idx, batch_size) for t in target_list_per_sample]
         # targets == [labels, label_weights, bbox_targets, bbox_weights]
         return targets
@@ -352,7 +362,10 @@ class SparseClusterHeadV2(SparseClusterHead):
                            cluster_xyz,
                            gt_bboxes_3d,
                            gt_labels_3d,
-                           reg_preds=None):
+                           reg_preds=None,
+                           gt_box_type=1,
+                           img_metas=None,
+                           ):
         """Generate targets of vote head for single batch.
 
         """
@@ -373,14 +386,15 @@ class SparseClusterHeadV2(SparseClusterHead):
 
         gt_bboxes_3d = gt_bboxes_3d.to(cluster_xyz.device)
         if self.train_cfg.get('assign_by_dist', False):
-            assign_result = self.assign_by_dist_single(cluster_xyz, gt_bboxes_3d, gt_labels_3d)
+            assign_result = self.assign_by_dist_single(cluster_xyz, gt_bboxes_3d, gt_labels_3d)  # 没修改
         else:
-            assign_result = self.assign_single(cluster_xyz, gt_bboxes_3d, gt_labels_3d)
+            assign_result = self.assign_single(cluster_xyz, gt_bboxes_3d, gt_labels_3d, gt_box_type, img_metas)
         
         # Do not put this before assign
-
-        sample_result = self.sampler.sample(assign_result, cluster_xyz, gt_bboxes_3d.tensor) # Pseudo Sampler, use cluster_xyz as pseudo bbox here.
-
+        if gt_box_type == 1:
+            sample_result = self.sampler.sample(assign_result, cluster_xyz, gt_bboxes_3d.tensor) # Pseudo Sampler, use cluster_xyz as pseudo bbox here.
+        elif gt_box_type ==2 :
+            sample_result = self.sampler.sample(assign_result, cluster_xyz, gt_bboxes_3d) # Pseudo Sampler, use cluster_xyz as pseudo bbox here.
         pos_inds = sample_result.pos_inds
         neg_inds = sample_result.neg_inds
 
@@ -390,7 +404,7 @@ class SparseClusterHeadV2(SparseClusterHead):
         bbox_weights[pos_inds] = 1.0
 
         if len(pos_inds) > 0:
-            bbox_targets[pos_inds] = self.bbox_coder.encode(sample_result.pos_gt_bboxes, cluster_xyz[pos_inds])
+            bbox_targets[pos_inds] = self.bbox_coder.encode(sample_result.pos_gt_bboxes, cluster_xyz[pos_inds], gt_box_type)
             if sample_result.pos_gt_bboxes.size(1) == 10: 
                 # zeros velocity loss weight for pasted objects
                 assert sample_result.pos_gt_bboxes[:, 9].max().item() in (0, 1)

@@ -11,7 +11,7 @@ from mmseg.models.builder import build_loss
 from mmdet.models.builder import build_loss as build_det_loss
 from mmdet3d.models.decode_heads.decode_head import Base3DDecodeHead
 
-from .utils import build_mlp, build_norm_act
+from .utils import build_mlp, build_norm_act, get_in_2d_box_inds
 from .fsd_ops import scatter_v2
 
 @HEADS.register_module()
@@ -261,11 +261,11 @@ class VoteSegHead(Base3DDecodeHead):
         assert gathered_score.size(1) == len(group_lens)
         return  gathered_score
 
-    def get_targets(self, points_list, gt_bboxes_list, gt_labels_list):
+    def get_targets(self, points_list, gt_bboxes_list, gt_labels_list, gt_box_type=1, img_metas=None):
         bsz = len(points_list)  # batch size
         label_list = []
         vote_target_list = []
-        vote_mask_list = []  # what is vote_mask? only in bboxes points need to vote,in test the vote_mask is pred foregrtound and background
+        vote_mask_list = []  # what is vote_mask? only in bboxes points need to vote,in test the vote_mask is pred foreground and background
 
         for i in range(bsz):
 
@@ -283,13 +283,21 @@ class VoteSegHead(Base3DDecodeHead):
                 this_vote_target = torch.zeros_like(points)
                 vote_mask = torch.zeros_like(this_label).bool()
             else:
-                extra_width = self.train_cfg.get('extra_width', None) 
-                if extra_width is not None:
-                    bboxes = bboxes.enlarged_box_hw(extra_width)
-                inbox_inds = bboxes.points_in_boxes(points).long()  #(N,),-1表示没有在box内部
-                this_label = self.get_point_labels(inbox_inds, bbox_labels)  # (N,)
-                this_vote_target, vote_mask = self.get_vote_target(inbox_inds, points, bboxes)
-
+                if gt_box_type == 1:
+                    extra_width = self.train_cfg.get('extra_width', None) 
+                    if extra_width is not None:
+                        bboxes = bboxes.enlarged_box_hw(extra_width)
+                    inbox_inds = bboxes.points_in_boxes(points).long()  #(N,),-1表示没有在box内部
+                    this_label = self.get_point_labels(inbox_inds, bbox_labels)  # (N,)
+                    this_vote_target, vote_mask = self.get_vote_target(inbox_inds, points, bboxes)
+                # if 2d box
+                elif gt_box_type == 2:
+                    extra_width = self.train_cfg.get('extra_width', None)
+                    if extra_width is not None:
+                        bboxes = self.enlarged_2d_box_hw(bboxes, extra_width)  # 待完成
+                    inbox_inds = get_in_2d_box_inds(points_list[i], bboxes, img_metas[i])
+                    this_label = self.get_point_labels(inbox_inds, bbox_labels)  # (N,)
+                    this_vote_target, vote_mask = self.get_vote_target_2d(inbox_inds, points, bboxes)
             label_list.append(this_label)
             vote_target_list.append(this_vote_target)
             vote_mask_list.append(vote_mask)
@@ -317,7 +325,7 @@ class VoteSegHead(Base3DDecodeHead):
             centroid, _, inv = scatter_v2(points, inbox_inds, mode='avg', return_inv=True)
             center_per_point = centroid[inv]
         else:
-            center_per_point = bboxes.gravity_center[inbox_inds]
+            center_per_point = bboxes.gravity_center[inbox_inds]  # 如果这里是2d的话，那么中心点就是2维的，投票的MLP网络的输出改成3-->2
         delta = center_per_point.to(points.device) - points
         delta[bg_mask] = 0
         target = self.encode_vote_targets(delta)
@@ -329,3 +337,44 @@ class VoteSegHead(Base3DDecodeHead):
     
     def decode_vote_targets(self, preds):
         return preds * preds.abs()
+
+    # 2d box的投票
+    def get_vote_target_2d(self, inbox_inds, points, bboxes):
+        '''
+        Input: 
+            inbox_inds:
+            points:
+            bboxes:
+        Return: 
+            this_vote_target:
+            vote_mask:
+        '''
+
+        bg_mask = inbox_inds < 0
+        if self.train_cfg.get('centroid_offset', False):
+            import pdb;pdb.set_trace()
+            centroid, _, inv = scatter_v2(points, inbox_inds, mode='avg', return_inv=True)
+            center_per_point = centroid[inv]
+        else:
+
+            fake_box_center = self.get_2d_box_center(inbox_inds, points, bboxes)
+
+            center_per_point = fake_box_center[inbox_inds]
+
+        delta = center_per_point.to(points.device) - points
+        delta[bg_mask] = 0
+        target = self.encode_vote_targets(delta)
+        vote_mask = ~bg_mask
+        return target, vote_mask
+
+    def get_2d_box_center(self, inbox_inds, points, bboxes):
+        # 这里是通过2d box得到了一簇点, 这一簇点求平均得到投票结果
+        # 当然也可以设计使用2d的投票点进行投票，我这里没有写，因为需要修改网络结构
+        fake_center = torch.zeros((bboxes.shape[0], 3))
+        
+        for i, box in enumerate(bboxes):
+            fake_cluster_points = points[torch.where(inbox_inds==i)[0]]
+            fake_cluster_points = fake_cluster_points[:,:3]
+            fake_center[i] = torch.mean(fake_cluster_points, dim=0)
+
+        return fake_center

@@ -337,3 +337,43 @@ def pts_semantic_confusion_matrix(pts_pred, pts_target, num_classes):
     pts_cond_count = pts_cond.bincount(minlength=num_classes * num_classes)
     return pts_cond_count[:num_classes * num_classes].reshape(
         num_classes, num_classes).cpu().numpy()
+
+
+def get_in_2d_box_inds(points, bboxes, img_metas=None):
+    # scale = img_metas['scale_factor'][0]
+    inds = (torch.ones(points.shape[0]) * -1).to(points.device)  # -1
+    # mask = torch.where(points)[0]
+    if points.shape[1] == 12:
+        # 使用所有的gt bbox进行筛选
+        for i, gt_bbox in enumerate(bboxes):
+            # gt_bbox = gt_bbox / scale
+            # if 0 cam 8,10（列，行）
+            gt_mask_0 = (((points[:, 8] > gt_bbox[0]) & (points[:, 8] < gt_bbox[2])) &
+                        ((points[:, 10] > gt_bbox[1]) & (points[:, 10] < gt_bbox[3])))
+            # if 1 cam 9,11
+            gt_mask_1 = (((points[:, 9] > gt_bbox[0]) & (points[:, 9] < gt_bbox[2])) &
+                        ((points[:, 11] > gt_bbox[1]) & (points[:, 11] < gt_bbox[3])))
+            gt_mask = gt_mask_0 | gt_mask_1
+
+            inds[gt_mask] = i
+
+    elif points.shape[1] == 3:
+        cam_points = lidar2img_fun(points, img_metas['lidar2img'], img_metas['scale_factor'][0])
+        for i, gt_bbox in enumerate(bboxes):
+            gt_mask = (((cam_points[:, 0] > gt_bbox[0]) & (cam_points[:, 0] < gt_bbox[2])) &
+                       ((cam_points[:, 1] > gt_bbox[1]) & (cam_points[:, 1] < gt_bbox[3])))
+
+            inds[gt_mask] = i
+            
+    return inds.long()
+
+def lidar2img_fun(points, lidar2img_matrix, scale=0.5):
+    # 注意：这里图片是否resize了，如果resize了，那么映射到的u,v也需要resize
+    lidar2img_matrix = torch.tensor(lidar2img_matrix, device=points.device)
+    points = points[:,:3]
+    points = torch.hstack((points, torch.ones((points.shape[0], 1), device=points.device,dtype=torch.float64)))
+    cam_uv_z = torch.matmul(lidar2img_matrix, points.T).T
+    rec_z = 1 / cam_uv_z[:, 2]
+    cam_uv = torch.mul(cam_uv_z.T, rec_z).T
+    return cam_uv[:, :2] * scale
+
