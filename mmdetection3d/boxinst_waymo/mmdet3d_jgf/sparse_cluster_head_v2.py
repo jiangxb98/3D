@@ -215,13 +215,13 @@ class SparseClusterHeadV2(SparseClusterHead):
         if cluster_inds.ndim == 1:
             cluster_batch_idx = cluster_inds
         else:
-            cluster_batch_idx = cluster_inds[:, 1]
+            cluster_batch_idx = cluster_inds[:, 1]  # (cls_id, batch_idx, cluster_id)
 
         num_total_samples = len(reg_preds)
 
-        num_task_classes = len(self.tasks[task_id]['class_names'])
+        num_task_classes = len(self.tasks[task_id]['class_names'])  # 这里为什么是长度？负标签指向了1=Pedestrian
         targets = self.get_targets(num_task_classes, cluster_xyz, cluster_batch_idx, gt_bboxes_3d, gt_labels_3d, reg_preds, gt_box_type, img_metas)
-        labels, label_weights, bbox_targets, bbox_weights, iou_labels = targets
+        labels, label_weights, bbox_targets, bbox_weights, iou_labels = targets  # 这个labels的意思？
         assert (label_weights == 1).all(), 'for now'
 
         cls_avg_factor = num_total_samples * 1.0
@@ -404,7 +404,7 @@ class SparseClusterHeadV2(SparseClusterHead):
         bbox_weights[pos_inds] = 1.0
 
         if len(pos_inds) > 0:
-            bbox_targets[pos_inds] = self.bbox_coder.encode(sample_result.pos_gt_bboxes, cluster_xyz[pos_inds], gt_box_type)
+            bbox_targets[pos_inds] = self.bbox_coder.encode(sample_result.pos_gt_bboxes, cluster_xyz[pos_inds], gt_box_type, img_metas)
             if sample_result.pos_gt_bboxes.size(1) == 10: 
                 # zeros velocity loss weight for pasted objects
                 assert sample_result.pos_gt_bboxes[:, 9].max().item() in (0, 1)
@@ -413,7 +413,7 @@ class SparseClusterHeadV2(SparseClusterHead):
                 bbox_weights[pos_inds, -2:] = sample_result.pos_gt_bboxes[:, [9]]
 
         if self.loss_iou is not None:
-            iou_labels = self.get_iou_labels(reg_preds, cluster_xyz, gt_bboxes_3d.tensor, pos_inds)
+            iou_labels = self.get_iou_labels(reg_preds, cluster_xyz, gt_bboxes_3d.tensor, pos_inds)  # 未修改
         else:
             iou_labels = None
 

@@ -2,7 +2,7 @@ import torch
 
 from mmdet.core.bbox import BaseBBoxCoder
 from mmdet.core.bbox.builder import BBOX_CODERS
-
+from .utils import lidar2img_fun
 
 @BBOX_CODERS.register_module()
 class BasePointBBoxCoder(BaseBBoxCoder):
@@ -33,29 +33,46 @@ class BasePointBBoxCoder(BaseBBoxCoder):
         self.num_classes = num_classes
         self.max_num = max_num
 
-    def encode(self, bboxes, base_points, gt_box_type):
+    def encode(self, bboxes, base_points, gt_box_type=1, img_metas=None):
         """
         Get regress target given bboxes and corresponding base_points
         base_points 是聚类中心
         """
-        dtype = bboxes.dtype
-        device = bboxes.device
 
-        assert bboxes.size(1) in (7, 9, 10), f'bboxes shape: {bboxes.shape}'
-        assert bboxes.size(0) == base_points.size(0)
-        xyz = bboxes[:,:3]  # gt box bottom center
-        dims = bboxes[:, 3:6]
-        yaw = bboxes[:, 6:7]
+        if bboxes.size(1) in (7, 9, 10):
+            assert bboxes.size(1) in (7, 9, 10), f'bboxes shape: {bboxes.shape}'
+            assert bboxes.size(0) == base_points.size(0)
+            xyz = bboxes[:,:3]  # gt box bottom center 这里还是有问题啊，为什么聚类中心往底面中心跑？
+            dims = bboxes[:, 3:6]
+            yaw = bboxes[:, 6:7]
 
-        log_dims = (dims + self.EPS).log()
+            log_dims = (dims + self.EPS).log()
 
-        dist2center = xyz - base_points  # 这里没有除以对角线，因为这是center-based，没有anchor
+            dist2center = xyz - base_points  # 这里没有除以对角线，因为这是center-based，没有anchor
 
-        delta = dist2center # / self.window_size_meter
-        reg_target = torch.cat([delta, log_dims, yaw.sin(), yaw.cos()], dim=1)
-        if bboxes.size(1) in (9, 10): # with velocity or copypaste flag
-            assert self.code_size == 10
-            reg_target = torch.cat([reg_target, bboxes[:, [7, 8]]], dim=1)
+            delta = dist2center # / self.window_size_meter
+            reg_target = torch.cat([delta, log_dims, yaw.sin(), yaw.cos()], dim=1)
+            if bboxes.size(1) in (9, 10): # with velocity or copypaste flag
+                assert self.code_size == 10
+                reg_target = torch.cat([reg_target, bboxes[:, [7, 8]]], dim=1)
+
+        elif bboxes.size(1) == 4:
+            x_center_gt = (bboxes[:, 0] + bboxes[:, 2]) * 0.5
+            y_center_gt = (bboxes[:, 1] + bboxes[:, 3]) * 0.5
+            w_gt = bboxes[:, 2] - bboxes[:, 0]
+            h_gt = bboxes[:, 3] - bboxes[:, 1]
+            w_target = (w_gt + self.EPS).log()
+            h_target = (h_gt + self.EPS).log()
+
+            base_points_uv = lidar2img_fun(base_points, img_metas['lidar2img'], img_metas['scale_factor'][0])
+            x_center_target = x_center_gt - base_points_uv[:, 0]
+            y_center_target = y_center_gt - base_points_uv[:, 1]
+            
+            # 朝向角 先空着
+            yaw = torch.zeros(x_center_gt.shape, device=base_points.device)
+
+            reg_target = torch.cat([x_center_target, y_center_target, w_target, h_target, yaw.sin(), yaw.cos()], dim=1)
+
         return reg_target
 
     def decode(self, reg_preds, base_points, detach_yaw=False):

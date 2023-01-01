@@ -297,7 +297,7 @@ class VoteSegHead(Base3DDecodeHead):
                         bboxes = self.enlarged_2d_box_hw(bboxes, extra_width)  # 待完成
                     inbox_inds = get_in_2d_box_inds(points_list[i], bboxes, img_metas[i])
                     this_label = self.get_point_labels(inbox_inds, bbox_labels)  # (N,)
-                    this_vote_target, vote_mask = self.get_vote_target_2d(inbox_inds, points, bboxes)
+                    this_vote_target, vote_mask = self.get_vote_target_2d(inbox_inds, points, bboxes)  # 由于2d box没有几何中心，所以这里的3d几何中心用2dbox内点的平均值
             label_list.append(this_label)
             vote_target_list.append(this_vote_target)
             vote_mask_list.append(vote_mask)
@@ -325,7 +325,7 @@ class VoteSegHead(Base3DDecodeHead):
             centroid, _, inv = scatter_v2(points, inbox_inds, mode='avg', return_inv=True)
             center_per_point = centroid[inv]
         else:
-            center_per_point = bboxes.gravity_center[inbox_inds]  # 如果这里是2d的话，那么中心点就是2维的，投票的MLP网络的输出改成3-->2
+            center_per_point = bboxes.gravity_center[inbox_inds]  #
         delta = center_per_point.to(points.device) - points
         delta[bg_mask] = 0
         target = self.encode_vote_targets(delta)
@@ -351,9 +351,9 @@ class VoteSegHead(Base3DDecodeHead):
         '''
 
         bg_mask = inbox_inds < 0
-        if self.train_cfg.get('centroid_offset', False):
-            import pdb;pdb.set_trace()
-            centroid, _, inv = scatter_v2(points, inbox_inds, mode='avg', return_inv=True)
+        if self.train_cfg.get('centroid_offset', False):# 未修改
+            import pdb; pdb.set_trace()
+            centroid, _, inv = scatter_v2(points, inbox_inds, mode='avg', return_inv=True)  
             center_per_point = centroid[inv]
         else:
 
