@@ -234,7 +234,7 @@ class MyWaymoDataset(Custom3DDataset):
         gt_bboxes_3d = gt_bboxes_3d[selected_3d]
         # exchange width&length
         #gt_bboxes_3d = gt_bboxes_3d[:, [0, 1, 2, 4, 3, 5, 6]]
-        gt_bboxes_3d = LiDARInstance3DBoxes(gt_bboxes_3d)  # 里面是一些对框的操作，gt3d的相对位置关系是(0.5,0.5,0)
+        gt_bboxes_3d = LiDARInstance3DBoxes(gt_bboxes_3d)  # 定义3Dbox实例，gt3d的相对位置关系是(0.5,0.5,0)
 
         # NOTE yaw: LiDAR -> CAM
         # gt_bboxes_3d.tensor[:, 6] = - gt_bboxes_3d.tensor[:, 6] - np.pi / 2

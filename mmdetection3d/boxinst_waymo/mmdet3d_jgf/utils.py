@@ -368,12 +368,21 @@ def get_in_2d_box_inds(points, bboxes, img_metas=None):
     return inds.long()
 
 def lidar2img_fun(points, lidar2img_matrix, scale=0.5):
-    # 注意：这里图片是否resize了，如果resize了，那么映射到的u,v也需要resize
-    lidar2img_matrix = torch.tensor(lidar2img_matrix, device=points.device)
-    points = points[:,:3]
-    points = torch.hstack((points, torch.ones((points.shape[0], 1), device=points.device,dtype=torch.float64)))
-    cam_uv_z = torch.matmul(lidar2img_matrix, points.T).T
-    rec_z = 1 / cam_uv_z[:, 2]
-    cam_uv = torch.mul(cam_uv_z.T, rec_z).T
-    return cam_uv[:, :2] * scale
 
+    lidar2img_matrix = torch.tensor(lidar2img_matrix, device=points.device)
+
+    if points.dim() == 2:
+        # 注意：这里图片是否resize了，如果resize了，那么映射到的u,v也需要resize
+        points = points[:,:3]
+        points = torch.hstack((points, torch.ones((points.shape[0], 1), device=points.device,dtype=torch.float64)))
+        cam_uv_z = torch.matmul(lidar2img_matrix, points.T).T
+        rec_z = 1 / cam_uv_z[:, 2]
+        cam_uv = torch.mul(cam_uv_z.T, rec_z).T
+        return (cam_uv[:, :2] * scale).type(torch.float32)
+
+    elif points.dim() == 3:
+        batch_cam_uv = torch.zeros((points.shape[0],points.shape[1],2), device=points.device)
+        for i in range(len(points)):
+            cam_uv = lidar2img_fun(points[i], lidar2img_matrix, scale)
+            batch_cam_uv[i] = cam_uv
+        return batch_cam_uv.type(torch.float32)

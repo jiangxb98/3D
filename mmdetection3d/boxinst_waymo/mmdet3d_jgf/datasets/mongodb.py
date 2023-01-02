@@ -64,7 +64,7 @@ class MONGODBBackend(BaseStorageBackend):
                 print(e)
                 time.sleep(0.1)
                 continue
-            return ret[:2]
+            return ret[881:883]
 
     def get_text(self, filepath, encoding=None):
         raise NotImplementedError

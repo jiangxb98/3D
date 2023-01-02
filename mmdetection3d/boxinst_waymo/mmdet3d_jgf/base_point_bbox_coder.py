@@ -24,10 +24,14 @@ class BasePointBBoxCoder(BaseBBoxCoder):
                  score_thresh=0.1,
                  num_classes=3,
                  max_num=500,
-                 code_size=8):
+                 code_size=8,
+                 gt_box_type=1):
 
         self.post_center_range = post_center_range
+        self.gt_box_type = gt_box_type
         self.code_size = code_size
+        if self.gt_box_type == 2:
+            self.code_size = 6  # dx,dy,dw,dh,theta,theta
         self.EPS = 1e-6
         self.score_thresh=score_thresh
         self.num_classes = num_classes
@@ -71,11 +75,14 @@ class BasePointBBoxCoder(BaseBBoxCoder):
             # 朝向角 先空着
             yaw = torch.zeros(x_center_gt.shape, device=base_points.device)
 
-            reg_target = torch.cat([x_center_target, y_center_target, w_target, h_target, yaw.sin(), yaw.cos()], dim=1)
+            reg_target = torch.stack([x_center_target, y_center_target, w_target, h_target, yaw.sin(), yaw.cos()], dim=1)
 
         return reg_target
 
     def decode(self, reg_preds, base_points, detach_yaw=False):
+        """
+        decode不需要改变
+        """
 
         assert reg_preds.size(1) in (8, 10)
         assert reg_preds.size(1) == self.code_size

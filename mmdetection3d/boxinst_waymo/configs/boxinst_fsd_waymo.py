@@ -10,6 +10,7 @@ class_names = ['Car', 'Pedestrian', 'Cyclist']
 semantic_class_names = class_names
 num_classes = len(class_names)
 seg_score_thresh = (0.3, 0.25, 0.25)
+gt_box_type = 2  # 1 is 3d,2 is 2d
 
 pts_segmentor = dict(
     type='VoteSegmentor',
@@ -106,7 +107,7 @@ model = dict(
     type='MultiModalAutoLabel',
     with_pts_branch=True,
     with_img_branch=False,
-    gt_box_type=1, # 1 is 3d,2 is 2d
+    gt_box_type=gt_box_type,
     img_backbone=dict(
         type='ResNet',
         depth=50,
@@ -200,7 +201,8 @@ model = dict(
     pts_bbox_head=dict(
         type='SparseClusterHeadV2',
         num_classes=num_classes,
-        bbox_coder=dict(type='BasePointBBoxCoder'),
+        bbox_coder=dict(type='BasePointBBoxCoder',
+                        gt_box_type=gt_box_type,),
         loss_cls=dict(
             type='FocalLoss',
             use_sigmoid=True,

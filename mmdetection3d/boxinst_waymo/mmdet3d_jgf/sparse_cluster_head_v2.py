@@ -206,7 +206,7 @@ class SparseClusterHeadV2(SparseClusterHead):
             img_metas=None,
         ):
 
-        # 用处？过滤得到改类别下的box和label
+        # 用处？过滤得到改类别下的box和label，注意这个gt_labels_3d，无论哪个类别下都是 0，所以后面就会将len()=1作为背景
         gt_bboxes_3d, gt_labels_3d = self.modify_gt_for_single_task(gt_bboxes_3d, gt_labels_3d, task_id, gt_box_type)
         
         if iou_logits is not None and iou_logits.dtype == torch.float16:
@@ -221,7 +221,7 @@ class SparseClusterHeadV2(SparseClusterHead):
 
         num_task_classes = len(self.tasks[task_id]['class_names'])  # 这里为什么是长度？负标签指向了1=Pedestrian
         targets = self.get_targets(num_task_classes, cluster_xyz, cluster_batch_idx, gt_bboxes_3d, gt_labels_3d, reg_preds, gt_box_type, img_metas)
-        labels, label_weights, bbox_targets, bbox_weights, iou_labels = targets  # 这个labels的意思？
+        labels, label_weights, bbox_targets, bbox_weights, iou_labels = targets  # 
         assert (label_weights == 1).all(), 'for now'
 
         cls_avg_factor = num_total_samples * 1.0
@@ -239,6 +239,7 @@ class SparseClusterHeadV2(SparseClusterHead):
         pos_reg_preds = reg_preds[pos_inds]
         pos_bbox_targets = bbox_targets[pos_inds]
         pos_bbox_weights = bbox_weights[pos_inds]
+        pos_cluster_xyz = cluster_xyz[pos_inds]
 
         reg_avg_factor = num_pos * 1.0
         if self.sync_reg_avg_factor:
@@ -323,7 +324,7 @@ class SparseClusterHeadV2(SparseClusterHead):
             cls_id = self.class_names.index(name)
             this_cls_mask = gt_labels_3d == cls_id
             out_gt_bboxes_list.append(gt_bboxes_3d[this_cls_mask])
-            out_labels_list.append(gt_labels_3d.new_ones(this_cls_mask.sum()) * i)
+            out_labels_list.append(gt_labels_3d.new_ones(this_cls_mask.sum()) * i)  # 这个地方赋0的 i一直是0
         if gt_box_type == 1:
             out_gt_bboxes_3d = gt_bboxes_3d.cat(out_gt_bboxes_list)
         elif gt_box_type == 2:
@@ -374,6 +375,7 @@ class SparseClusterHeadV2(SparseClusterHead):
         label_weights = cluster_xyz.new_ones(num_cluster)
         bbox_targets = cluster_xyz.new_zeros((num_cluster, self.box_code_size))
         bbox_weights = cluster_xyz.new_zeros((num_cluster, self.box_code_size))
+
         if num_cluster == 0:
             iou_labels = None
             if self.loss_iou is not None:
