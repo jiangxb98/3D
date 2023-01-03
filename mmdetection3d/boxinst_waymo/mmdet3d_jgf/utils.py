@@ -340,7 +340,7 @@ def pts_semantic_confusion_matrix(pts_pred, pts_target, num_classes):
 
 
 def get_in_2d_box_inds(points, bboxes, img_metas=None):
-    # scale = img_metas['scale_factor'][0]
+    # scale = img_metas['scale_factor'][0] # 前面有代码完成了这一步multi_modal_autolabel.self.scal_cp_cor
     inds = (torch.ones(points.shape[0]) * -1).to(points.device)  # -1
     # mask = torch.where(points)[0]
     if points.shape[1] == 12:
@@ -368,13 +368,14 @@ def get_in_2d_box_inds(points, bboxes, img_metas=None):
     return inds.long()
 
 def lidar2img_fun(points, lidar2img_matrix, scale=0.5):
-
-    lidar2img_matrix = torch.tensor(lidar2img_matrix, device=points.device)
+    
+    if not torch.is_tensor(lidar2img_matrix):
+        lidar2img_matrix = torch.tensor(lidar2img_matrix, device=points.device, type=torch.float32)
 
     if points.dim() == 2:
         # 注意：这里图片是否resize了，如果resize了，那么映射到的u,v也需要resize
         points = points[:,:3]
-        points = torch.hstack((points, torch.ones((points.shape[0], 1), device=points.device,dtype=torch.float64)))
+        points = torch.hstack((points, torch.ones((points.shape[0], 1), device=points.device,dtype=torch.float32)))
         cam_uv_z = torch.matmul(lidar2img_matrix, points.T).T
         rec_z = 1 / cam_uv_z[:, 2]
         cam_uv = torch.mul(cam_uv_z.T, rec_z).T
@@ -382,7 +383,31 @@ def lidar2img_fun(points, lidar2img_matrix, scale=0.5):
 
     elif points.dim() == 3:
         batch_cam_uv = torch.zeros((points.shape[0],points.shape[1],2), device=points.device)
-        for i in range(len(points)):
+        for i in range(len(points)):  # 这里可以直接flatten展开，然后计算后再view回去 points.view(-1, points.shape[-1]) (N*8,3), cam_uv.view(points.shape[0],-1,3)
             cam_uv = lidar2img_fun(points[i], lidar2img_matrix, scale)
             batch_cam_uv[i] = cam_uv
         return batch_cam_uv.type(torch.float32)
+
+def get_bounding_rec_2d(corners):
+    """
+    Input:
+        corners: (N,8,2)
+    Return:
+        corners_2d: (N,4)
+        center_2d: (N,2)
+        wh: (N,2)
+    """
+    x1y1, _ = torch.min(corners, dim=1)  # 注意这里返回值可能超出了像素坐标，比如坐标值＜0或者＞像素边界
+    x2y2, _ = torch.max(corners, dim=1)
+
+    corners_2d = torch.cat((x1y1, x2y2), dim=1) # (N,4)
+
+    w = (corners_2d[:,2] - corners_2d[:,0])
+    h = (corners_2d[:,3] - corners_2d[:,1])
+    wh = torch.stack((w, h), dim=1)  
+
+    center_2d_u = (corners_2d[:,2] + corners_2d[:,0]) * 0.5
+    center_2d_v = (corners_2d[:,3] + corners_2d[:,1]) * 0.5
+    center_2d = torch.stack((center_2d_u, center_2d_v), dim=1)
+
+    return corners_2d, center_2d, wh

@@ -98,7 +98,7 @@ class SparseClusterHead(BaseModule):
                 self.conv_iou = nn.Linear(end_channel, 1)
         
         self.save_list = []
-
+        self.EPS = 1e-6
 
     def forward(self, feats, pts_xyz=None, pts_inds=None):
 

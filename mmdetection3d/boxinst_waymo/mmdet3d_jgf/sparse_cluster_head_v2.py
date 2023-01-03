@@ -12,7 +12,7 @@ from mmdet.core import multi_apply, reduce_mean
 from mmcv.runner import BaseModule, force_fp32
 
 from .sparse_cluster_head import SparseClusterHead
-from .utils import box3d_multiclass_nms, build_mlp
+from .utils import box3d_multiclass_nms, build_mlp, get_bounding_rec_2d, lidar2img_fun
 
 
 @HEADS.register_module()
@@ -74,6 +74,7 @@ class SparseClusterHeadV2(SparseClusterHead):
                  init_cfg=None,
                  shared_dropout=0,
                  loss_vel=None,
+                 loss_centerness=None,
                  ):
         super().__init__(
             num_classes,
@@ -130,7 +131,10 @@ class SparseClusterHeadV2(SparseClusterHead):
         else:
             self.loss_vel = None
         
-
+        if loss_centerness is not None:
+            self.loss_centerness = build_loss(loss_centerness)
+        else:
+            self.loss_centerness = None
 
     def forward(self, feats, pts_xyz=None, pts_inds=None):
 
@@ -240,6 +244,7 @@ class SparseClusterHeadV2(SparseClusterHead):
         pos_bbox_targets = bbox_targets[pos_inds]
         pos_bbox_weights = bbox_weights[pos_inds]
         pos_cluster_xyz = cluster_xyz[pos_inds]
+        pos_cluster_batch_idx = cluster_batch_idx[pos_inds]
 
         reg_avg_factor = num_pos * 1.0
         if self.sync_reg_avg_factor:
@@ -252,28 +257,10 @@ class SparseClusterHeadV2(SparseClusterHead):
                 pos_bbox_weights = pos_bbox_weights * bbox_weights.new_tensor(
                     code_weight)
 
-
-            loss_center = self.loss_center(
-                pos_reg_preds[:, :3],
-                pos_bbox_targets[:, :3],
-                pos_bbox_weights[:, :3],
-                avg_factor=reg_avg_factor)
-            loss_size = self.loss_size(
-                pos_reg_preds[:, 3:6],
-                pos_bbox_targets[:, 3:6],
-                pos_bbox_weights[:, 3:6],
-                avg_factor=reg_avg_factor)
-            loss_rot = self.loss_rot(
-                pos_reg_preds[:, 6:8],
-                pos_bbox_targets[:, 6:8],
-                pos_bbox_weights[:, 6:8],
-                avg_factor=reg_avg_factor)
-            if self.loss_vel is not None:
-                loss_vel = self.loss_vel(
-                    pos_reg_preds[:, 8:10],
-                    pos_bbox_targets[:, 8:10],
-                    pos_bbox_weights[:, 8:10],
-                )
+            if gt_box_type == 1:
+                loss_center, loss_size, loss_rot, loss_vel = self.get_reg_loss_3d(pos_reg_preds, pos_bbox_targets, pos_bbox_weights, reg_avg_factor)
+            elif gt_box_type == 2:
+                loss_center, loss_size, loss_rot, loss_centerness = self.get_reg_loss_2d(pos_reg_preds, pos_bbox_targets, pos_bbox_weights, reg_avg_factor, pos_cluster_xyz, img_metas, pos_cluster_batch_idx)
         else:
             loss_center = pos_reg_preds.sum() * 0
             loss_size = pos_reg_preds.sum() * 0
@@ -290,6 +277,9 @@ class SparseClusterHeadV2(SparseClusterHead):
         if self.loss_vel is not None:
             losses['loss_vel'] = loss_vel
 
+        if self.loss_centerness is not None:
+            losses['loss_centerness'] = loss_centerness
+
         if self.corner_loss_cfg is not None:
             losses['loss_corner'] = self.get_corner_loss(pos_reg_preds, pos_bbox_targets, cluster_xyz[pos_inds], reg_avg_factor)
 
@@ -301,6 +291,104 @@ class SparseClusterHeadV2(SparseClusterHead):
         losses_with_task_id = {k + '.task' + str(task_id): v for k, v in losses.items()}
 
         return losses_with_task_id
+
+    def get_reg_loss_3d(self, pos_reg_preds, pos_bbox_targets, pos_bbox_weights, reg_avg_factor):
+
+        loss_center = self.loss_center(
+            pos_reg_preds[:, :3],
+            pos_bbox_targets[:, :3],
+            pos_bbox_weights[:, :3],
+            avg_factor=reg_avg_factor)
+        loss_size = self.loss_size(
+            pos_reg_preds[:, 3:6],
+            pos_bbox_targets[:, 3:6],
+            pos_bbox_weights[:, 3:6],
+            avg_factor=reg_avg_factor)
+        loss_rot = self.loss_rot(
+            pos_reg_preds[:, 6:8],
+            pos_bbox_targets[:, 6:8],
+            pos_bbox_weights[:, 6:8],
+            avg_factor=reg_avg_factor)
+        if self.loss_vel is not None:
+            loss_vel = self.loss_vel(
+                pos_reg_preds[:, 8:10],
+                pos_bbox_targets[:, 8:10],
+                pos_bbox_weights[:, 8:10],
+            )
+        else:
+            loss_vel = None
+
+        return loss_center, loss_size, loss_rot, loss_vel
+
+    def get_reg_loss_2d(self, pos_reg_preds, pos_bbox_targets, pos_bbox_weights, reg_avg_factor, pos_cluster_xyz, img_metas, pos_cluster_batch_idx):
+        """
+        pos_reg_preds:    (Np, 8) dx,dy,dz,log(l+eps),log(w+wps),log(h+eps),sin(yaw),cos(yaw)
+        pos_bbox_targets: (Np, 6) du,dv,dw,dh,sin(yaw),cos(yaw)
+        pos_bbox_weights: (Np, 6)
+        avg_factor:        Np
+        pos_cluster_xyz:  (Np, 3)
+        img_metas:
+        """        
+        batch_size = len(img_metas)
+        nums = pos_reg_preds.shape[0]
+        device = pos_bbox_targets.device
+
+        xyz = pos_reg_preds[:, :3] + pos_cluster_xyz  # 注意：2d预测的dz是几何中心点,(3d预测的dz是底部中心)
+        dims = pos_reg_preds[:, 3:6].exp() - self.EPS
+        sin = pos_reg_preds[:, 6:7]
+        cos = pos_reg_preds[:, 7:8]
+        yaw = torch.atan2(sin, cos)
+
+        pred_bbox = LiDARInstance3DBoxes(torch.cat([xyz, dims, yaw], dim=1), origin=(0.5, 0.5, 0.5))
+
+        pred_corners = pred_bbox.corners  # (N, 8, 3)
+        assert (xyz.data == pred_bbox.gravity_center.data).all()
+        pred_gravity_center = pred_bbox.gravity_center  # (N,3)
+
+        cluster_points_uv = torch.zeros((nums, 2), device=device)
+        pred_corners_uv = torch.zeros((pred_corners.shape[0], pred_corners.shape[1], 2), device=device)
+        pred_center_uv = torch.zeros((nums, 2), device=device)
+
+        for i in range(batch_size):
+            batch_mask = pos_cluster_batch_idx == i
+            cluster_points_uv[batch_mask] = lidar2img_fun(pos_cluster_xyz, img_metas[i]['lidar2img'], img_metas[i]['scale_factor'][0])[batch_mask]  # (N,2)
+            pred_corners_uv[batch_mask] = lidar2img_fun(pred_corners, img_metas[i]['lidar2img'], img_metas[i]['scale_factor'][0])[batch_mask]  # (N, 8, 2)
+            pred_center_uv[batch_mask] = lidar2img_fun(pred_gravity_center, img_metas[i]['lidar2img'], img_metas[i]['scale_factor'][0])[batch_mask]  #(N, 2)
+
+        corners_2d, center_2d, wh = get_bounding_rec_2d(pred_corners_uv)  # (x1,y1,x2,y2), (center_u,center_v), wh
+        # pred_center_uv有两种计算方式，一种是直接通过3d几何投影到然后变换到2d uv(如下)
+        
+        # 另一种是得到8个角点的外接矩形，然后通过这个矩形得到中心点uv(如下)
+        # pred_center_uv = center_2d
+
+        pred_center_dudv = pred_center_uv - cluster_points_uv
+    
+        loss_center = self.loss_center(
+            pred_center_dudv,
+            pos_bbox_targets[:, :2],
+            pos_bbox_weights[:, :2],
+            avg_factor=reg_avg_factor)
+        
+        log_dims = (wh + self.EPS).log()
+        loss_size = self.loss_size(
+            log_dims,
+            pos_bbox_targets[:, 2:4],
+            pos_bbox_weights[:, 2:4],
+            avg_factor=reg_avg_factor)
+
+        loss_rot = self.loss_rot(
+            pos_reg_preds[:, 4:6],
+            pos_bbox_targets[:, 4:6],
+            pos_bbox_weights[:, 4:6],
+            avg_factor=reg_avg_factor)
+
+        loss_centerness = None
+        if self.loss_centerness is not None:
+            loss_centerness = self.loss_centerness(
+
+            )
+
+        return loss_center, loss_size, loss_rot, loss_centerness
 
     def modify_gt_for_single_task(self, gt_bboxes_3d, gt_labels_3d, task_id, gt_box_type):
         out_bboxes_list, out_labels_list = [], []
@@ -421,7 +509,6 @@ class SparseClusterHeadV2(SparseClusterHead):
 
         return labels, label_weights, bbox_targets, bbox_weights, iou_labels
     
-
         # generate votes target
     def enlarge_gt_bboxes(self, gt_bboxes_3d, gt_labels_3d=None):
         if self.enlarge_width is not None:

@@ -577,7 +577,7 @@ class MultiModalAutoLabel(Base3DDetector):
         losses = dict()
 
         # 测试拿出来了，如果不测试就注释掉，这个是放在img_branch里的
-        # points = self.filter_points(img_metas=img_metas, points=points)
+        points = self.filter_points(img_metas=img_metas, points=points)
 
         # 1. Image Branch
         if self.with_img_backbone and self.with_img_branch:
