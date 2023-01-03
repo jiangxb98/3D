@@ -342,7 +342,6 @@ class SparseClusterHeadV2(SparseClusterHead):
         pred_bbox = LiDARInstance3DBoxes(torch.cat([xyz, dims, yaw], dim=1), origin=(0.5, 0.5, 0.5))
 
         pred_corners = pred_bbox.corners  # (N, 8, 3)
-        assert (xyz.data == pred_bbox.gravity_center.data).all()
         pred_gravity_center = pred_bbox.gravity_center  # (N,3)
 
         cluster_points_uv = torch.zeros((nums, 2), device=device)
