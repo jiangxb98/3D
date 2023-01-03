@@ -370,7 +370,7 @@ def get_in_2d_box_inds(points, bboxes, img_metas=None):
 def lidar2img_fun(points, lidar2img_matrix, scale=0.5):
     
     if not torch.is_tensor(lidar2img_matrix):
-        lidar2img_matrix = torch.tensor(lidar2img_matrix, device=points.device, type=torch.float32)
+        lidar2img_matrix = torch.tensor(lidar2img_matrix, device=points.device, dtype=torch.float32)
 
     if points.dim() == 2:
         # 注意：这里图片是否resize了，如果resize了，那么映射到的u,v也需要resize
