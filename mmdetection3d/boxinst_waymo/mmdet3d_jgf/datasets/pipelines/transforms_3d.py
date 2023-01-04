@@ -1,6 +1,7 @@
 import random
 import torch
 import numpy as np
+from scipy.sparse.csgraph import connected_components  # CCL
 from mmcv.utils import build_from_cfg
 from mmdet3d.core.bbox import box_np_ops, Coord3DMode, Box3DMode
 from mmdet3d.datasets.builder import PIPELINES
@@ -671,10 +672,22 @@ class GetOrientation:
     """
     得到2D框内对象的朝向角
     """
-    def __init__(self, gt_box_type=1, sample_roi_points=100, th_dx=4):
+    def __init__(self, gt_box_type=1, sample_roi_points=100, th_dx=4, dist=0.6):
         self.gt_box_type = gt_box_type
         self.sample_roi_points = sample_roi_points
         self.th_dx = th_dx  # 阈值
+        self.dist = dist
+
+    def find_connected_componets_single_batch(self, points, dist):
+
+        this_points = points
+        dist_mat = this_points[:, None, :2] - this_points[None, :, :2] # only care about xy
+        dist_mat = (dist_mat ** 2).sum(2) ** 0.5
+        adj_mat = dist_mat < dist
+        adj_mat = adj_mat
+        c_inds = connected_components(adj_mat, directed=False)[1]
+
+        return c_inds
 
     def get_in_2d_box_points(self, results):
         points = results['points'].tensor.numpy()
@@ -724,6 +737,13 @@ class GetOrientation:
         batch_lidar_density = np.zeros((gt_bboxes.shape[0], self.sample_roi_points), dtype=np.float32)
         
         for i in range(len(roi_batch_points)):
+            
+            c_inds = self.find_connected_componets_single_batch(RoI_points[i], self.dist)
+            set_c_inds = list(set(c_inds))
+            c_ind = np.argmax([np.sum(c_inds == i) for i in set_c_inds])
+            c_mask = c_inds == set_c_inds[c_ind]
+            RoI_points[i] = RoI_points[i][c_mask]
+            
             z_coor = RoI_points[i][:, 2]  # height val
             batch_lidar_y_center[i] = np.mean(z_coor)
             z_thesh = (np.max(z_coor) + np.min(z_coor)) / 2

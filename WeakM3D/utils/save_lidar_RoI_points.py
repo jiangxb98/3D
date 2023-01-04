@@ -69,8 +69,8 @@ if __name__ == '__main__':
 
         # obtain 2d coordinates
         calib = calib_parse.parse_calib('raw', [calib_cam_to_cam_list[i], calib_velo_to_cam_list[i]])
-        l_3d = (calib['l2i'] @ np.concatenate([l_3d, np.ones_like(l_3d[:, 0:1])], axis=1).T).T
-        l_2d = (calib['P2'] @ np.concatenate([l_3d, np.ones_like(l_3d[:, 0:1])], axis=1).T).T
+        l_3d = (calib['l2i'] @ np.concatenate([l_3d, np.ones_like(l_3d[:, 0:1])], axis=1).T).T  # 相机坐标系下
+        l_2d = (calib['P2'] @ np.concatenate([l_3d, np.ones_like(l_3d[:, 0:1])], axis=1).T).T   # 像素坐标
         l_2d = (l_2d[:, :2] / l_2d[:, 2:3]).astype(np.int)
 
         # remove points outside fov
