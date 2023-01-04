@@ -715,58 +715,60 @@ class GetOrientation:
     def get_orientation(self, roi_batch_points, results):
         
         RoI_points = roi_batch_points
-        # points = results['points'].tensor.numpy()
         gt_bboxes = results['gt_bboxes']
         assert len(roi_batch_points) == len(gt_bboxes) and len(gt_bboxes) == len(results['gt_labels'])
 
         batch_RoI_points = np.zeros((gt_bboxes.shape[0], self.sample_roi_points, 3), dtype=np.float32)
-        batch_lidar_y_center = np.zeros((gt_bboxes.shape[0], 1), dtype=np.float32)  # 启发式的深度信息
-        batch_lidar_orient = np.zeros((gt_bboxes.shape[0], 1), dtype=np.float32)
+        batch_lidar_y_center = np.zeros((gt_bboxes.shape[0],), dtype=np.float32)  # 启发式的深度信息
+        batch_lidar_orient = np.zeros((gt_bboxes.shape[0],), dtype=np.float32)
         batch_lidar_density = np.zeros((gt_bboxes.shape[0], self.sample_roi_points), dtype=np.float32)
         
         for i in range(len(roi_batch_points)):
-            y_coor = RoI_points[i][:, 2]  # height val
-            batch_lidar_y_center[i] = np.mean(y_coor)
-            # y_thesh = (np.max(y_coor) + np.min(y_coor)) / 2
-            # y_ind = RoI_points[i][:, 2] < y_thesh  # 这里没看懂，为什么靠下？
+            z_coor = RoI_points[i][:, 2]  # height val
+            batch_lidar_y_center[i] = np.mean(z_coor)
+            z_thesh = (np.max(z_coor) + np.min(z_coor)) / 2
+            z_ind = RoI_points[i][:, 2] < z_thesh  # 这里没看懂，为什么靠下？
 
-            # y_ind_points = RoI_points[i][y_ind]
-            # if y_ind_points.shape[0] < 10:
-            y_ind_points = RoI_points[i]
+            z_ind_points = RoI_points[i][z_ind]
+            if z_ind_points.shape[0] < 10:
+                z_ind_points = RoI_points[i]
 
-            rand_ind = np.random.randint(0, y_ind_points.shape[0], 100)
-            depth_points_sample = y_ind_points[rand_ind]
+            rand_ind = np.random.randint(0, z_ind_points.shape[0], 100)
+            depth_points_sample = z_ind_points[rand_ind]
             batch_RoI_points[i] = depth_points_sample
-            depth_points_np_xz = depth_points_sample[:, [0, 1]]  # 获得当前2d框内的点云的xy坐标
+            depth_points_np_xy = depth_points_sample[:, [0, 1]]  # 获得当前2d框内的点云的xy坐标
 
             '''orient'''
-            orient_set = [(i[0] - j[0]) / (i[1] - j[1]) for j in depth_points_np_xz
-                          for i in depth_points_np_xz]  # 斜率，存在nan值，分母为0
+            orient_set = [(i[0] - j[0]) / (i[1] - j[1]) for j in depth_points_np_xy
+                          for i in depth_points_np_xy]  # 斜率，存在nan值，分母为0
             orient_sort = np.array(sorted(np.array(orient_set).reshape(-1)))
             orient_sort = np.arctan(orient_sort[~np.isnan(orient_sort)])  # 过滤掉nan值，然后得到角度 [-pi/2,pi/2]
             orient_sort_round = np.around(orient_sort, decimals=1)  # 对输入浮点数执行5舍6入，5做特殊处理 decimals保留1位小数
-            set_orenit = list(set(orient_sort_round))  # 去重，得到直方图的bin
+            set_orenit = list(set(orient_sort_round))  # 去重，得到直方图的bin  [-1.6, 1.6]
             try:
                 ind = np.argmax([np.sum(orient_sort_round == i) for i in set_orenit])  # 得到直方图最高的点
-                orient = np.pi/2 - set_orenit[ind]
+                orient = set_orenit[ind]
+                if orient < 0:  # 角度是钝角时，＜0，需要加上pi,变换到正方向
+                    orient += np.pi
+
+                orient = np.pi/2 - orient  # 转到wamoy坐标系下，yaw的定义
+                if np.max(RoI_points[i][:, 1]) - np.min(RoI_points[i][:, 1]) < self.th_dx:  # 如果小于dx阈值，则说明方向垂直于当前的orient
+                    if orient > 0:
+                        orient = orient - np.pi/2
+                    else:
+                        orient = orient + np.pi/2
             except:
                 orient = 0  # 如果np.argmax得不到值，就默认为沿x轴方向
-
-            if np.max(RoI_points[i][:, 1]) - np.min(RoI_points[i][:, 1]) < self.th_dx:  # 如果小于dx阈值，则
-                if orient > 0:
-                    orient = orient - np.pi/2
-                else:
-                    orient = orient + np.pi/2
             batch_lidar_orient[i] = orient
 
             '''density'''
-            p_dis = np.array([(i[0] - depth_points_sample[:, 0]) ** 2 + (i[2] - depth_points_sample[:, 2]) ** 2
+            p_dis = np.array([(i[0] - depth_points_sample[:, 0]) ** 2 + (i[1] - depth_points_sample[:, 1]) ** 2
                                  for i in depth_points_sample])
             batch_lidar_density[i] = np.sum(p_dis < 0.04, axis=1)
 
-        results['gt_yaw'] = batch_lidar_orient.astype(np.float32),
-        results['lidar_density'] = batch_lidar_density.astype(np.float32),
-        results['roi_points'] = batch_RoI_points.astype(np.float32),
+        results['gt_yaw'] = batch_lidar_orient.astype(np.float32)
+        results['lidar_density'] = batch_lidar_density.astype(np.float32)
+        results['roi_points'] = batch_RoI_points.astype(np.float32)
         results['y_center'] = batch_lidar_y_center.astype(np.float32)  # 启发式的深度信息
         return results
 

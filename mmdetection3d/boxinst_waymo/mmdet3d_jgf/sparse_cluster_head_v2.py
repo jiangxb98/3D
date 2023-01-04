@@ -168,7 +168,7 @@ class SparseClusterHeadV2(SparseClusterHead):
         reg_preds,   # list[(125,8), (125,8), (125,8)]
         cluster_xyz, # [125,3]
         cluster_inds,# [125,3]
-        gt_bboxes_3d,# [B, LiDARInstance3DBoxes nums]
+        gt_bboxes_3d,# 3D is [B, LiDARInstance3DBoxes nums]; 2D is [x1,y1,x2,y2,yaw]
         gt_labels_3d,# [B, label_nums]
         img_metas=None,
         iou_logits=None,
@@ -376,7 +376,7 @@ class SparseClusterHeadV2(SparseClusterHead):
             avg_factor=reg_avg_factor)
 
         loss_rot = self.loss_rot(
-            pos_reg_preds[:, 4:6],
+            pos_reg_preds[:, 6:8],
             pos_bbox_targets[:, 4:6],
             pos_bbox_weights[:, 4:6],
             avg_factor=reg_avg_factor)

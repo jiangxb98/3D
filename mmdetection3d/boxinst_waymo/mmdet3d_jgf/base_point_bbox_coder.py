@@ -60,7 +60,7 @@ class BasePointBBoxCoder(BaseBBoxCoder):
                 assert self.code_size == 10
                 reg_target = torch.cat([reg_target, bboxes[:, [7, 8]]], dim=1)
 
-        elif bboxes.size(1) == 4:
+        elif bboxes.size(1) in (4,5):   # [x1,y1,x2,y2,yaw]
             x_center_gt = (bboxes[:, 0] + bboxes[:, 2]) * 0.5
             y_center_gt = (bboxes[:, 1] + bboxes[:, 3]) * 0.5
             w_gt = bboxes[:, 2] - bboxes[:, 0]
@@ -73,7 +73,7 @@ class BasePointBBoxCoder(BaseBBoxCoder):
             y_center_target = y_center_gt - base_points_uv[:, 1]
             
             # 朝向角 先空着
-            yaw = torch.zeros(x_center_gt.shape, device=base_points.device)
+            yaw = bboxes[:, 4]
 
             reg_target = torch.stack([x_center_target, y_center_target, w_target, h_target, yaw.sin(), yaw.cos()], dim=1)
 

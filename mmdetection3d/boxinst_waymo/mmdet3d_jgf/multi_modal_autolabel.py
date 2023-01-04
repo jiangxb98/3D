@@ -544,6 +544,8 @@ class MultiModalAutoLabel(Base3DDetector):
                       pts_semantic_mask=None,
                       pts_instance_mask=None,
                       gt_semantic_seg=None,
+                      gt_yaw=None,
+                      lidar_density=None,
                       ):
         """Forward training function.
 
@@ -606,15 +608,14 @@ class MultiModalAutoLabel(Base3DDetector):
 
         # 3. FSD-Points Branch    
         if self.with_pts_backbone and self.with_pts_branch:
-            # 如果不存在3d box而且使用3d分支，那么使用2d box做监督
-            if gt_bboxes_3d is None:
-                gt_bboxes_3d = gt_bboxes
-                gt_labels_3d = gt_labels
-                self.gt_box_type = 2  # box 1 is 3d box, 2 is 2d box
+            # 若使用2d box做监督
             if self.gt_box_type == 2:
+                gt_bboxes = self.combine_yaw_info(gt_bboxes, gt_yaw) 
                 gt_bboxes_3d = gt_bboxes
                 gt_labels_3d = gt_labels
                 points = self.scale_cp_cor(points, img_metas) # 提前将3d对应的2d坐标，根据输入图片resize大小来放缩
+                gt_yaw = gt_yaw
+                lidar_density = lidar_density  # 待定
             rpn_outs = self.forward_pts_train(points,
                                                 img_metas,
                                                 gt_bboxes_3d,
@@ -1389,6 +1390,7 @@ class MultiModalAutoLabel(Base3DDetector):
         # add fg points
         cfg = self.train_cfg.pts if self.training else self.test_cfg.pts
 
+        # 没修改
         if cfg.get('add_gt_fg_points', False):
             import pdb;pdb.set_trace()
             bsz = len(gt_bboxes_3d)
@@ -1545,6 +1547,10 @@ class MultiModalAutoLabel(Base3DDetector):
                 points[i][:,8:12] = points[i][:,8:12] * scale
         return points
 
+    def combine_yaw_info(self, bboxes, gt_yaw):
+        for i in range(len(bboxes)):
+            bboxes[i] = torch.cat((bboxes[i], gt_yaw[i].unsqueeze(dim=1)), dim=1)
+        return bboxes
 
 class ClusterAssigner(torch.nn.Module):
     ''' Generating cluster centers for each class and assign each point to cluster centers
