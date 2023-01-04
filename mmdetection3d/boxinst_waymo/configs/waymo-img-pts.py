@@ -14,6 +14,7 @@ datainfo_client_args = dict(
 class_names = ['Car', 'Pedestrian', 'Cyclist']
 point_cloud_range = [-74.88, -74.88, -2, 74.88, 74.88, 4]
 input_modality = dict(use_lidar=True, use_camera=True)
+gt_box_type = 2  # 1 use 3D Box 2 use 2D Box
 semantic_class_names = class_names
 # the image is rgb so not convert to rgb, and mean std need exchange dimension
 # 不需要将图片转为rgb，所以因为读出来的就是rgb
@@ -43,7 +44,7 @@ train_pipeline = [
         with_seg=False,
         file_client_args=file_client_args),
     dict(
-        type='FilterLabelImage',
+        type='FilterLabelByImage',
         filter_calss_name=class_names,
         with_mask=False,
         with_seg=False,
@@ -64,7 +65,7 @@ train_pipeline = [
         size=[(640, 960),(640, 960),(640, 960),
             (640, 960),(640, 960)]),
     dict(
-        type='SampleFrameImage', 
+        type='SampleFrameImage',
         sample='random',
         guide='gt_bboxes',
         training =True,
@@ -72,16 +73,15 @@ train_pipeline = [
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     # dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='PointShuffle'),
-
-    # 过滤掉2D Boxes外的点，目前不需要，也没有写，我直接写在网络里了
-    # dict(type='FilterGTBboxesPoints', gt_boxes_enabled=True),
+    dict(type='FilterPointsByImage',coord_type='LIDAR'),    # 过滤获得投影到当前图片的点云
+    dict(type='GetOrientation',gt_box_type=gt_box_type),# 获得在2d gt内的方向，如果2d box内没有点云，那么丢弃2d box和2d label
 
     # To DataContainer
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
         type='Collect3D', 
         keys=['img', 'gt_bboxes', 'gt_labels',  # 'gt_semantic_seg', 'gt_masks',
-              'points', 'gt_bboxes_3d', 'gt_labels_3d', ],  # 'pts_semantic_mask'
+              'points', 'gt_bboxes_3d', 'gt_labels_3d', 'gt_yaw', 'lidar_density'],  # 'pts_semantic_mask'
         meta_keys=['filename','img_shape','ori_shape','pad_shape',
             'scale','scale_factor','keep_ratio','lidar2img',
             'sample_idx','img_info','ann_info','pts_info',

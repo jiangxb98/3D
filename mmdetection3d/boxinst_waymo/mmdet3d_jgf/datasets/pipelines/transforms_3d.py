@@ -7,6 +7,7 @@ from mmdet3d.datasets.builder import PIPELINES
 from mmdet3d.datasets.builder import OBJECTSAMPLERS
 from mmdet3d.datasets.pipelines import RandomFlip3D
 from mmdet.core import BitmapMasks, PolygonMasks
+from mmdet3d.core.points import get_points_type, BasePoints
 import warnings
 import mmcv
 from PIL import Image
@@ -520,7 +521,7 @@ class NormalizeMultiViewImage:
 
 
 @PIPELINES.register_module()
-class FilterLabelImage:
+class FilterLabelByImage:
     '''filter pan and segment label of 2d and 3d
 
     - filter_class_name: the class to use
@@ -640,42 +641,137 @@ class SampleFrameImage:
 
         return results
 
+
 @PIPELINES.register_module()
-class FilterGTBboxesPoints:
+class FilterPointsByImage:
     """
-    The corresponding point cloud is obtained 
-    according to the 2D GT Boxes
+    The project point cloud is obtained by the Image idx
     """
-    def __init__(self, gt_boxes_enabled=False):
-        self.gt_boxes_enabled = gt_boxes_enabled
+    def __init__(self, coord_type):
+        self.coord_type = coord_type
 
     def _filter_points(self, results):
-        points = results['points']
-        gt_bboxes = results['gt_bboxes']
-        gt_mask = np.array([False for _ in range(points.shape[0])])
-        for gt_bbox in gt_bboxes:
-            # if 0 cam 8,10（列，行）
-            gt_mask_0 = (((points[:, 8] > gt_bbox[0]) & (points[:, 8] < gt_bbox[2])) &
-                        ((points[:, 10] > gt_bbox[1]) & (points[:, 10] < gt_bbox[3])) &
-                        (points[:, 6] == 0))
-            # if 1 cam 9,11
-            gt_mask_1 = (((points[:, 9] > gt_bbox[0]) & (points[:, 9] < gt_bbox[2])) &
-                        ((points[:, 11] > gt_bbox[1]) & (points[:, 11] < gt_bbox[3])) &
-                        (points[:, 7] == 0))
-            gt_mask = gt_mask_0 | gt_mask_1 | gt_mask
-        points_mask = np.indices(points.shape).squeeze()
-        gt_points_mask = points_mask[gt_mask]
-        in_gt_bboxes_points = points[gt_mask]
+        points = results['points'].tensor.numpy()
+        sample_img_id = results['sample_img_id']
+        mask = (points[:,6]==sample_img_id) | (points[:,7]==sample_img_id)
+        in_img_points = points[mask]
         
         results['ori_points'] = results['points']
-        results['points'] = in_gt_bboxes_points
-        results['points_mask'] = gt_points_mask
-        results['filter_gt_bboxes_points'] = self.gt_boxes_enabled
+        points_class = get_points_type(self.coord_type)
+        results['points'] = points_class(in_img_points, points_dim=in_img_points.shape[-1])  # 实例化，LiDARPoints
 
         return results
         
+    def __call__(self, results):
+        results = self._filter_points(results)
+        return results
+
+@PIPELINES.register_module()
+class GetOrientation:
+    """
+    得到2D框内对象的朝向角
+    """
+    def __init__(self, gt_box_type=1, sample_roi_points=100, th_dx=4):
+        self.gt_box_type = gt_box_type
+        self.sample_roi_points = sample_roi_points
+        self.th_dx = th_dx  # 阈值
+
+    def get_in_2d_box_points(self, results):
+        points = results['points'].tensor.numpy()
+        gt_bboxes = results['gt_bboxes']
+        labels = results['gt_labels']
+        sample_img_id = results['sample_img_id']
+        scale = results['scale_factor'][0]
+        roi_batch_points = []
+        
+        out_gt_bboxes = []
+        out_gt_labels = []
+
+        for i, gt_bbox in enumerate(gt_bboxes):
+            # 2d box是resize过得, 需要还原
+            gt_bbox = gt_bbox / scale
+            # if 0 cam 8,10（列，行）
+            gt_mask_0 = (((points[:, 8] > gt_bbox[0]) & (points[:, 8] < gt_bbox[2])) &
+                        ((points[:, 10] > gt_bbox[1]) & (points[:, 10] < gt_bbox[3])) &
+                        (points[:, 6] == sample_img_id))
+            # if 1 cam 9,11
+            gt_mask_1 = (((points[:, 9] > gt_bbox[0]) & (points[:, 9] < gt_bbox[2])) &
+                        ((points[:, 11] > gt_bbox[1]) & (points[:, 11] < gt_bbox[3])) &
+                        (points[:, 7] == sample_img_id))
+
+            gt_mask = gt_mask_0 | gt_mask_1
+            in_box_points = points[gt_mask]
+            # 如果2d框里没有点，那么就过滤掉对应的2d box和label
+            if len(in_box_points) == 0:
+                continue
+            out_gt_bboxes.append(gt_bbox)
+            out_gt_labels.append(labels[i])
+            roi_batch_points.append(in_box_points[:,:3])  # only xyz
+        assert len(roi_batch_points) == len(out_gt_bboxes)
+        results['gt_labels'] = np.array(out_gt_labels)
+        results['gt_bboxes'] = np.array(out_gt_bboxes)
+        return roi_batch_points, results
+    
+    def get_orientation(self, roi_batch_points, results):
+        
+        RoI_points = roi_batch_points
+        # points = results['points'].tensor.numpy()
+        gt_bboxes = results['gt_bboxes']
+        assert len(roi_batch_points) == len(gt_bboxes) and len(gt_bboxes) == len(results['gt_labels'])
+
+        batch_RoI_points = np.zeros((gt_bboxes.shape[0], self.sample_roi_points, 3), dtype=np.float32)
+        batch_lidar_y_center = np.zeros((gt_bboxes.shape[0], 1), dtype=np.float32)  # 启发式的深度信息
+        batch_lidar_orient = np.zeros((gt_bboxes.shape[0], 1), dtype=np.float32)
+        batch_lidar_density = np.zeros((gt_bboxes.shape[0], self.sample_roi_points), dtype=np.float32)
+        
+        for i in range(len(roi_batch_points)):
+            y_coor = RoI_points[i][:, 2]  # height val
+            batch_lidar_y_center[i] = np.mean(y_coor)
+            # y_thesh = (np.max(y_coor) + np.min(y_coor)) / 2
+            # y_ind = RoI_points[i][:, 2] < y_thesh  # 这里没看懂，为什么靠下？
+
+            # y_ind_points = RoI_points[i][y_ind]
+            # if y_ind_points.shape[0] < 10:
+            y_ind_points = RoI_points[i]
+
+            rand_ind = np.random.randint(0, y_ind_points.shape[0], 100)
+            depth_points_sample = y_ind_points[rand_ind]
+            batch_RoI_points[i] = depth_points_sample
+            depth_points_np_xz = depth_points_sample[:, [0, 1]]  # 获得当前2d框内的点云的xy坐标
+
+            '''orient'''
+            orient_set = [(i[0] - j[0]) / (i[1] - j[1]) for j in depth_points_np_xz
+                          for i in depth_points_np_xz]  # 斜率，存在nan值，分母为0
+            orient_sort = np.array(sorted(np.array(orient_set).reshape(-1)))
+            orient_sort = np.arctan(orient_sort[~np.isnan(orient_sort)])  # 过滤掉nan值，然后得到角度 [-pi/2,pi/2]
+            orient_sort_round = np.around(orient_sort, decimals=1)  # 对输入浮点数执行5舍6入，5做特殊处理 decimals保留1位小数
+            set_orenit = list(set(orient_sort_round))  # 去重，得到直方图的bin
+            try:
+                ind = np.argmax([np.sum(orient_sort_round == i) for i in set_orenit])  # 得到直方图最高的点
+                orient = np.pi/2 - set_orenit[ind]
+            except:
+                orient = 0  # 如果np.argmax得不到值，就默认为沿x轴方向
+
+            if np.max(RoI_points[i][:, 1]) - np.min(RoI_points[i][:, 1]) < self.th_dx:  # 如果小于dx阈值，则
+                if orient > 0:
+                    orient = orient - np.pi/2
+                else:
+                    orient = orient + np.pi/2
+            batch_lidar_orient[i] = orient
+
+            '''density'''
+            p_dis = np.array([(i[0] - depth_points_sample[:, 0]) ** 2 + (i[2] - depth_points_sample[:, 2]) ** 2
+                                 for i in depth_points_sample])
+            batch_lidar_density[i] = np.sum(p_dis < 0.04, axis=1)
+
+        results['gt_yaw'] = batch_lidar_orient.astype(np.float32),
+        results['lidar_density'] = batch_lidar_density.astype(np.float32),
+        results['roi_points'] = batch_RoI_points.astype(np.float32),
+        results['y_center'] = batch_lidar_y_center.astype(np.float32)  # 启发式的深度信息
+        return results
 
     def __call__(self, results):
-        if self.gt_boxes_enabled:
-            results = self._filter_points(results)
+        if self.gt_box_type == 2:
+            roi_batch_points, results = self.get_in_2d_box_points(results)  # (gt_box的数量, 3)
+            results = self.get_orientation(roi_batch_points, results)
         return results

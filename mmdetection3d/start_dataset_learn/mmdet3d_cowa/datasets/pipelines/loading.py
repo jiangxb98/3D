@@ -289,7 +289,7 @@ class LoadAnnos(LoadAnnotations):
 
 
 @PIPELINES.register_module()
-class FilterLabelImage:
+class FilterLabelByImage:
     '''filter pan and segment label of 2d and 3d
 
     - filter_class_name: the class to use

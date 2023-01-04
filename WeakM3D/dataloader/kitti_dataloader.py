@@ -180,7 +180,7 @@ class KITTI3D_Object_Dataset_Raw_RoI_Lidar(KITTI3D_Object_Dataset):
             rand_ind = np.random.randint(0, y_ind_points.shape[0], 100)
             depth_points_sample = y_ind_points[rand_ind]
             batch_RoI_points[i] = depth_points_sample
-            depth_points_np_xz = depth_points_sample[:, [0, 2]]
+            depth_points_np_xz = depth_points_sample[:, [0, 2]]  # 获得当前2d框内的点云的xz坐标，z指向前方
 
             '''orient'''
             orient_set = [(i[1] - j[1]) / (i[0] - j[0]) for j in depth_points_np_xz
@@ -192,7 +192,7 @@ class KITTI3D_Object_Dataset_Raw_RoI_Lidar(KITTI3D_Object_Dataset):
 
             ind = np.argmax([np.sum(orient_sort_round == i) for i in set_orenit])
             orient = set_orenit[ind]
-            if orient < 0:
+            if orient < 0:  
                 orient += np.pi
 
             if orient > np.pi / 2 + np.pi * 3 / 8:

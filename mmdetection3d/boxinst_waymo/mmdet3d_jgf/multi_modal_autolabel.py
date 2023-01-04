@@ -1270,7 +1270,7 @@ class MultiModalAutoLabel(Base3DDetector):
             new_point_list.append(points[this_fg_mask])
         return new_point_list
 
-    #SingleStageFSD
+    # SingleStageFSD
     def pre_voxelize(self, data_dict):
         batch_idx = data_dict['batch_idx']
         points = data_dict['seg_points']

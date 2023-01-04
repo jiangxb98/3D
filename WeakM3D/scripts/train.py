@@ -153,7 +153,7 @@ def eval_one_epoch(save_dir_exp, InferImgLoader_RoI, model, dim_prior, gt_dir, a
             p_locxy, p_locZ, p_ortConf = pred_3D
             p_locXYZ = torch.cat([p_locxy, p_locZ], dim=1)
 
-            fx, fy, cx, cy = P2[0][0], P2[1][1], P2[0][2], P2[1][2]
+            fx, fy, cx, cy = P2[0][0], P2[1][1], P2[0][2], P2[1][2]  # 内参，所以这都是在相机坐标系下的
 
             det_3D = np.zeros((p_locXYZ.shape[0], 16), dtype=object)
             det_3D[:, 0] = ['Car' for _ in range(p_locXYZ.shape[0])]

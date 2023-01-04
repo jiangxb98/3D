@@ -56,7 +56,7 @@ train_pipeline = [
         file_client_args=file_client_args
     ),
     dict(
-        type='FilterLabelImage',
+        type='FilterLabelByImage',
         filter_calss_name=class_names,
         with_mask=True,
         with_seg=True,
