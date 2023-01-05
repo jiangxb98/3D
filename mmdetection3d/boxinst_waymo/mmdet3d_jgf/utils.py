@@ -340,6 +340,7 @@ def pts_semantic_confusion_matrix(pts_pred, pts_target, num_classes):
 
 
 def get_in_2d_box_inds(points, bboxes, img_metas=None):
+    """注意，这里的没有对点进行过滤操作，需要过滤一下，代码还没加"""
     # scale = img_metas['scale_factor'][0] # 前面有代码完成了这一步multi_modal_autolabel.self.scal_cp_cor
     inds = (torch.ones(points.shape[0]) * -1).to(points.device)  # -1
     # mask = torch.where(points)[0]
@@ -411,3 +412,240 @@ def get_bounding_rec_2d(corners):
     center_2d = torch.stack((center_2d_u, center_2d_v), dim=1)
 
     return corners_2d, center_2d, wh
+
+def calc_dis_rect_object_centric(wl, Ry, points, density):
+    """基于BEV的计算,注意输入的points坐标也需要转换
+    wl 先验anchor的长和宽
+    Ry 朝向角
+    points 投影在2d box的点,减去预测的中心点(N,2)
+    density (N,1) 每个points的密度
+    """
+    # 转到weakm3d下 orient_new = orient_old - np.pi/2
+    PI = torch.tensor([np.pi], device=Ry.device)
+    Ry = Ry + PI/2
+
+    init_theta, length = torch.atan(wl[0] / wl[1]), torch.sqrt(wl[0] ** 2 + wl[1] ** 2) / 2  # 0.5:1
+    corners = [(length * torch.cos(init_theta + Ry),
+                length * torch.sin(init_theta + Ry)),
+
+               (length * torch.cos(np.pi - init_theta + Ry),
+                length * torch.sin(np.pi - init_theta + Ry)),
+
+               (length * torch.cos(np.pi + init_theta + Ry),
+                length * torch.sin(np.pi + init_theta + Ry)),
+
+               (length * torch.cos(-init_theta + Ry),
+                length * torch.sin(-init_theta + Ry))]
+
+    if Ry == np.pi/2:
+        Ry -= 1e-4
+    if Ry == 0:
+        Ry += 1e-4
+
+    k1, k2 = torch.tan(Ry), torch.tan(Ry + np.pi / 2)
+    b11 = corners[0][1] - k1 * corners[0][0]
+    b12 = corners[2][1] - k1 * corners[2][0]
+    b21 = corners[0][1] - k2 * corners[0][0]
+    b22 = corners[2][1] - k2 * corners[2][0]
+
+    # line0 = [k1, -1, b11]
+    # line1 = [k1, -1, b12]
+    # line2 = [k2, -1, b21]
+    # line3 = [k2, -1, b22]
+
+    line0 = [k1, -1, b11]
+    line1 = [k2, -1, b22]
+    line2 = [k1, -1, b12]
+    line3 = [k2, -1, b21]
+
+    points[points[:, 0] == 0, 0] = 1e-4
+    #################################################
+    slope_x = points[:, 1] / points[:, 0]
+    intersect0 = torch.stack([line0[2] / (slope_x - line0[0]),
+                              line0[2]*slope_x / (slope_x - line0[0])], dim=1)
+    intersect1 = torch.stack([line1[2] / (slope_x - line1[0]),
+                              line1[2]*slope_x / (slope_x - line1[0])], dim=1)
+    intersect2 = torch.stack([line2[2] / (slope_x - line2[0]),
+                              line2[2]*slope_x / (slope_x - line2[0])], dim=1)
+    intersect3 = torch.stack([line3[2] / (slope_x - line3[0]),
+                              line3[2]*slope_x / (slope_x - line3[0])], dim=1)
+
+    # dis0 = torch.sqrt((intersect0[:, 0] - points[:, 0])**2 +
+    #                   (intersect0[:, 1] - points[:, 1])**2)
+    # dis1 = torch.sqrt((intersect1[:, 0] - points[:, 0])**2 +
+    #                   (intersect1[:, 1] - points[:, 1])**2)
+    # dis2 = torch.sqrt((intersect2[:, 0] - points[:, 0])**2 +
+    #                   (intersect2[:, 1] - points[:, 1])**2)
+    # dis3 = torch.sqrt((intersect3[:, 0] - points[:, 0])**2 +
+    #                   (intersect3[:, 1] - points[:, 1])**2)
+
+    dis0 = torch.abs(intersect0[:, 0] - points[:, 0]) + torch.abs(intersect0[:, 1] - points[:, 1])
+    dis1 = torch.abs(intersect1[:, 0] - points[:, 0]) + torch.abs(intersect1[:, 1] - points[:, 1])
+    dis2 = torch.abs(intersect2[:, 0] - points[:, 0]) + torch.abs(intersect2[:, 1] - points[:, 1])
+    dis3 = torch.abs(intersect3[:, 0] - points[:, 0]) + torch.abs(intersect3[:, 1] - points[:, 1])
+
+
+    # dis_inter2center0 = torch.sqrt(intersect0[:, 0]**2 + intersect0[:, 1]**2)
+    # dis_inter2center1 = torch.sqrt(intersect1[:, 0]**2 + intersect1[:, 1]**2)
+    # dis_inter2center2 = torch.sqrt(intersect2[:, 0]**2 + intersect2[:, 1]**2)
+    # dis_inter2center3 = torch.sqrt(intersect3[:, 0]**2 + intersect3[:, 1]**2)
+    #
+    # dis_point2center = torch.sqrt(points[:, 0]**2 + points[:, 1]**2)
+    #################################################
+
+    points_z = torch.cat([points, torch.zeros_like(points[:, :1])], dim=1)
+    vec0 = torch.tensor([corners[0][0], corners[0][1], 0], device=points_z.device)
+    vec1 = torch.tensor([corners[1][0], corners[1][1], 0], device=points_z.device)
+    vec2 = torch.tensor([corners[2][0], corners[2][1], 0], device=points_z.device)
+    vec3 = torch.tensor([corners[3][0], corners[3][1], 0], device=points_z.device)
+
+    ''' calc direction of vectors'''
+    cross0 = torch.cross(points_z, vec0.unsqueeze(0).repeat(points_z.shape[0], 1))[:, 2]
+    cross1 = torch.cross(points_z, vec1.unsqueeze(0).repeat(points_z.shape[0], 1))[:, 2]
+    cross2 = torch.cross(points_z, vec2.unsqueeze(0).repeat(points_z.shape[0], 1))[:, 2]
+    cross3 = torch.cross(points_z, vec3.unsqueeze(0).repeat(points_z.shape[0], 1))[:, 2]
+
+
+    ''' calc angle across vectors'''
+    norm_p = torch.sqrt(points_z[:, 0] ** 2 + points_z[:, 1] ** 2)
+    norm_d = torch.sqrt(corners[0][0] ** 2 + corners[0][1] ** 2).repeat(points_z.shape[0])
+    norm = norm_p * norm_d
+
+    dot_vec0 = torch.matmul(points_z, vec0.unsqueeze(0).repeat(points_z.shape[0], 1).t())[:, 0]
+    dot_vec1 = torch.matmul(points_z, vec1.unsqueeze(0).repeat(points_z.shape[0], 1).t())[:, 0]
+    dot_vec2 = torch.matmul(points_z, vec2.unsqueeze(0).repeat(points_z.shape[0], 1).t())[:, 0]
+    dot_vec3 = torch.matmul(points_z, vec3.unsqueeze(0).repeat(points_z.shape[0], 1).t())[:, 0]
+
+    angle0 = torch.acos(dot_vec0/(norm))
+    angle1 = torch.acos(dot_vec1/(norm))
+    angle2 = torch.acos(dot_vec2/(norm))
+    angle3 = torch.acos(dot_vec3/(norm))
+
+    angle_sum0 = (angle0 + angle1) < np.pi
+    angle_sum1 = (angle1 + angle2) < np.pi
+    angle_sum2 = (angle2 + angle3) < np.pi
+    angle_sum3 = (angle3 + angle0) < np.pi
+
+    cross_dot0 = (cross0 * cross1) < 0
+    cross_dot1 = (cross1 * cross2) < 0
+    cross_dot2 = (cross2 * cross3) < 0
+    cross_dot3 = (cross3 * cross0) < 0
+
+    cross_all = torch.stack([cross_dot0, cross_dot1, cross_dot2, cross_dot3], dim=1)
+    angle_sum_all = torch.stack([angle_sum0, angle_sum1, angle_sum2, angle_sum3], dim=1)
+
+    choose_ind = cross_all & angle_sum_all
+    dis_all = torch.stack([dis0, dis1, dis2, dis3], dim=1) / density.unsqueeze(1)
+    choose_dis = dis_all[choose_ind]
+    choose_dis[choose_dis != choose_dis] = 0
+
+    dis_error = torch.mean(choose_dis)
+
+    return dis_error
+
+def calc_dis_ray_tracing(wl, Ry, points, density, bev_box_center):
+    # 转到weakm3d下 orient_new = orient_old - np.pi/2
+    PI = torch.tensor([np.pi], device=Ry.device)
+    Ry = Ry + PI/2
+ 
+    init_theta, length = torch.atan(wl[0] / wl[1]), torch.sqrt(wl[0] ** 2 + wl[1] ** 2) / 2  # 0.5:1
+    corners = [(length * torch.cos(init_theta + Ry) + bev_box_center[0],
+                length * torch.sin(init_theta + Ry) + bev_box_center[1]),
+
+               (length * torch.cos(np.pi - init_theta + Ry) + bev_box_center[0],
+                length * torch.sin(np.pi - init_theta + Ry) + bev_box_center[1]),
+
+               (length * torch.cos(np.pi + init_theta + Ry) + bev_box_center[0],
+                length * torch.sin(np.pi + init_theta + Ry) + bev_box_center[1]),
+
+               (length * torch.cos(-init_theta + Ry) + bev_box_center[0],
+                length * torch.sin(-init_theta + Ry) + bev_box_center[1])]
+    if Ry == np.pi/2:
+        Ry -= 1e-4
+    if Ry == 0:
+        Ry += 1e-4
+    k1, k2 = torch.tan(Ry), torch.tan(Ry + np.pi / 2)
+    b11 = corners[0][1] - k1 * corners[0][0]
+    b12 = corners[2][1] - k1 * corners[2][0]
+    b21 = corners[0][1] - k2 * corners[0][0]
+    b22 = corners[2][1] - k2 * corners[2][0]
+
+    line0 = [k1, -1, b11]
+    line1 = [k2, -1, b22]
+    line2 = [k1, -1, b12]
+    line3 = [k2, -1, b21]
+
+    points[points[:, 0] == 0, 0] = 1e-4 # avoid inf
+    #################################################
+    slope_x = points[:, 1] / points[:, 0]
+    intersect0 = torch.stack([line0[2] / (slope_x - line0[0]),
+                              line0[2]*slope_x / (slope_x - line0[0])], dim=1)
+    intersect1 = torch.stack([line1[2] / (slope_x - line1[0]),
+                              line1[2]*slope_x / (slope_x - line1[0])], dim=1)
+    intersect2 = torch.stack([line2[2] / (slope_x - line2[0]),
+                              line2[2]*slope_x / (slope_x - line2[0])], dim=1)
+    intersect3 = torch.stack([line3[2] / (slope_x - line3[0]),
+                              line3[2]*slope_x / (slope_x - line3[0])], dim=1)
+
+
+    dis0 = torch.abs(intersect0[:, 0] - points[:, 0]) + torch.abs(intersect0[:, 1] - points[:, 1])
+    dis1 = torch.abs(intersect1[:, 0] - points[:, 0]) + torch.abs(intersect1[:, 1] - points[:, 1])
+    dis2 = torch.abs(intersect2[:, 0] - points[:, 0]) + torch.abs(intersect2[:, 1] - points[:, 1])
+    dis3 = torch.abs(intersect3[:, 0] - points[:, 0]) + torch.abs(intersect3[:, 1] - points[:, 1])
+
+
+    dis_inter2center0 = torch.sqrt(intersect0[:, 0]**2 + intersect0[:, 1]**2)
+    dis_inter2center1 = torch.sqrt(intersect1[:, 0]**2 + intersect1[:, 1]**2)
+    dis_inter2center2 = torch.sqrt(intersect2[:, 0]**2 + intersect2[:, 1]**2)
+    dis_inter2center3 = torch.sqrt(intersect3[:, 0]**2 + intersect3[:, 1]**2)
+
+    intersect0 = torch.round(intersect0*1e4)
+    intersect1 = torch.round(intersect1*1e4)
+    intersect2 = torch.round(intersect2*1e4)
+    intersect3 = torch.round(intersect3*1e4)
+
+
+    dis0_in_box_edge = ((intersect0[:, 0] > torch.round(min(corners[0][0], corners[1][0])*1e4)) &
+                        (intersect0[:, 0] < torch.round(max(corners[0][0], corners[1][0])*1e4))) | \
+                       ((intersect0[:, 1] > torch.round(min(corners[0][1], corners[1][1])*1e4)) &
+                        (intersect0[:, 1] < torch.round(max(corners[0][1], corners[1][1])*1e4)))
+    dis1_in_box_edge = ((intersect1[:, 0] > torch.round(min(corners[1][0], corners[2][0])*1e4)) &
+                        (intersect1[:, 0] < torch.round(max(corners[1][0], corners[2][0])*1e4))) | \
+                       ((intersect1[:, 1] > torch.round(min(corners[1][1], corners[2][1])*1e4)) &
+                        (intersect1[:, 1] < torch.round(max(corners[1][1], corners[2][1])*1e4)))
+    dis2_in_box_edge = ((intersect2[:, 0] > torch.round(min(corners[2][0], corners[3][0])*1e4)) &
+                        (intersect2[:, 0] < torch.round(max(corners[2][0], corners[3][0])*1e4))) | \
+                       ((intersect2[:, 1] > torch.round(min(corners[2][1], corners[3][1])*1e4)) &
+                        (intersect2[:, 1] < torch.round(max(corners[2][1], corners[3][1])*1e4)))
+    dis3_in_box_edge = ((intersect3[:, 0] > torch.round(min(corners[3][0], corners[0][0])*1e4)) &
+                        (intersect3[:, 0] < torch.round(max(corners[3][0], corners[0][0])*1e4))) | \
+                       ((intersect3[:, 1] > torch.round(min(corners[3][1], corners[0][1])*1e4)) &
+                        (intersect3[:, 1] < torch.round(max(corners[3][1], corners[0][1])*1e4)))
+
+
+    dis_in_mul = torch.stack([dis0_in_box_edge, dis1_in_box_edge,
+                              dis2_in_box_edge, dis3_in_box_edge], dim=1)  # (100,4)
+    dis_inter2cen = torch.stack([dis_inter2center0, dis_inter2center1,
+                                 dis_inter2center2, dis_inter2center3], dim=1)  # (100,4)
+    dis_all = torch.stack([dis0, dis1, dis2, dis3], dim=1)  # (100, 4)
+
+    # dis_in = torch.sum(dis_in_mul, dim=1).type(torch.bool)  和下面的效果一样
+    dis_in = (torch.sum(dis_in_mul, dim=1) == 2).type(torch.bool)
+    if torch.sum(dis_in.int()) < 3:
+        return 0
+
+    dis_in_mul = dis_in_mul[dis_in]
+    dis_inter2cen = dis_inter2cen[dis_in]  # 交点到中心点的距离，(100,4)
+    dis_all = dis_all[dis_in]
+    density = density[dis_in]
+
+    z_buffer_ind = torch.argmin(dis_inter2cen[dis_in_mul].view(-1, 2), dim=1)  # 返回最近距离的索引是0还是1
+    # z_buffer_ind_gather = torch.stack([~z_buffer_ind.byte(), z_buffer_ind.byte()],
+    #                                   dim=1).type(torch.bool)
+    z_buffer_ind_gather = torch.stack([~(z_buffer_ind.type(torch.bool)), z_buffer_ind.type(torch.bool)],
+                                      dim=1)
+
+    dis = (dis_all[dis_in_mul].view(-1, 2))[z_buffer_ind_gather] / density
+
+    dis_mean = torch.mean(dis)
+    return dis_mean

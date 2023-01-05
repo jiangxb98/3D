@@ -191,9 +191,9 @@ class KITTI3D_Object_Dataset_Raw_RoI_Lidar(KITTI3D_Object_Dataset):
             set_orenit = list(set(orient_sort_round))
 
             ind = np.argmax([np.sum(orient_sort_round == i) for i in set_orenit])
-            orient = set_orenit[ind]
+            orient = set_orenit[ind] #这一步获得全局的方向，以z轴为参考轴
             if orient < 0:  
-                orient += np.pi
+                orient += np.pi  # 将0, -pi/2部分变到pi
 
             if orient > np.pi / 2 + np.pi * 3 / 8:
                 orient -= np.pi / 2

@@ -234,6 +234,11 @@ model = dict(
             act='relu',
         ),
         as_rpn=False,
+        anchor_size=[
+                     [4.73,2.08,1.77],  # car
+                     [0.91,0.84,1.74],  # pedestrian
+                     [1.81,0.84,1.77],  # cyclist
+                    ],
     ),
 
     # pts_roi_head=dict(

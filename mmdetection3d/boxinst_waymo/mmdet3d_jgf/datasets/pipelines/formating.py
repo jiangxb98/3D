@@ -51,7 +51,7 @@ class DefaultFormatBundle(object):
                 'proposals', 'gt_bboxes', 'gt_bboxes_ignore', 'gt_labels',
                 'gt_labels_3d', 'attr_labels', 'pts_instance_mask',
                 'pts_semantic_mask', 'centers2d', 'depths', 'gt_semantic_seg',
-                'gt_yaw', 'lidar_density',
+                'gt_yaw', 'lidar_density', 'roi_points'
         ]:
             if key not in results:
                 continue

@@ -12,7 +12,7 @@ from mmdet.core import multi_apply, reduce_mean
 from mmcv.runner import BaseModule, force_fp32
 
 from .sparse_cluster_head import SparseClusterHead
-from .utils import box3d_multiclass_nms, build_mlp, get_bounding_rec_2d, lidar2img_fun
+from .utils import box3d_multiclass_nms, build_mlp, get_bounding_rec_2d, lidar2img_fun, calc_dis_ray_tracing, calc_dis_rect_object_centric
 
 
 @HEADS.register_module()
@@ -75,6 +75,9 @@ class SparseClusterHeadV2(SparseClusterHead):
                  shared_dropout=0,
                  loss_vel=None,
                  loss_centerness=None,
+                 anchor_size=[[4.73,2.08,1.77],  # car
+                              [0.91,0.84,1.74],  # pedestrian
+                              [1.81,0.84,1.77]], # cyclist
                  ):
         super().__init__(
             num_classes,
@@ -99,6 +102,8 @@ class SparseClusterHeadV2(SparseClusterHead):
             as_rpn,
             init_cfg
         )
+
+        self.anchor_size = anchor_size
 
         # override
         self.conv_cls = None
@@ -173,7 +178,9 @@ class SparseClusterHeadV2(SparseClusterHead):
         img_metas=None,
         iou_logits=None,
         gt_bboxes_ignore=None,
-        gt_box_type=1
+        gt_box_type=1,
+        lidar_density=None,  # (B, label_nums, sample_roi_points=100) is list len(list)=B
+        roi_points=None,     # (B, label_nums, sample_roi_points=100, 3)
         ):
         assert isinstance(cls_logits, list)
         assert isinstance(reg_preds, list)
@@ -191,6 +198,8 @@ class SparseClusterHeadV2(SparseClusterHead):
                 iou_logits,
                 gt_box_type,
                 img_metas,
+                lidar_density,
+                roi_points,
             )
             all_task_losses.update(losses_this_task)
         return all_task_losses
@@ -208,10 +217,18 @@ class SparseClusterHeadV2(SparseClusterHead):
             iou_logits=None,
             gt_box_type=1,
             img_metas=None,
+            lidar_density=None,
+            roi_points=None,
         ):
 
-        # 用处？过滤得到改类别下的box和label，注意这个gt_labels_3d，无论哪个类别下都是 0，所以后面就会将len()=1作为背景
-        gt_bboxes_3d, gt_labels_3d = self.modify_gt_for_single_task(gt_bboxes_3d, gt_labels_3d, task_id, gt_box_type)
+        # 用处？过滤得到该类别下的box和label，注意这个gt_labels_3d，无论哪个类别下都是 0，所以后面就会将len()=1作为背景
+        gt_bboxes_3d, gt_labels_3d, lidar_density, roi_points = \
+            self.modify_gt_for_single_task(gt_bboxes_3d,
+                                           gt_labels_3d,
+                                           lidar_density,
+                                           roi_points,
+                                           task_id,
+                                           gt_box_type)
         
         if iou_logits is not None and iou_logits.dtype == torch.float16:
             iou_logits = iou_logits.to(torch.float)
@@ -223,9 +240,9 @@ class SparseClusterHeadV2(SparseClusterHead):
 
         num_total_samples = len(reg_preds)
 
-        num_task_classes = len(self.tasks[task_id]['class_names'])  # 这里为什么是长度？负标签指向了1=Pedestrian
-        targets = self.get_targets(num_task_classes, cluster_xyz, cluster_batch_idx, gt_bboxes_3d, gt_labels_3d, reg_preds, gt_box_type, img_metas)
-        labels, label_weights, bbox_targets, bbox_weights, iou_labels = targets  # 
+        num_task_classes = len(self.tasks[task_id]['class_names'])  # 这里为什么是长度？负标签指向了1 背景 0是前景点
+        targets = self.get_targets(num_task_classes, cluster_xyz, cluster_batch_idx, gt_bboxes_3d, gt_labels_3d, reg_preds, gt_box_type, img_metas, lidar_density, roi_points)
+        labels, label_weights, bbox_targets, bbox_weights, iou_labels, lidar_density_targets, roi_points_targets = targets  # 
         assert (label_weights == 1).all(), 'for now'
 
         cls_avg_factor = num_total_samples * 1.0
@@ -237,7 +254,7 @@ class SparseClusterHeadV2(SparseClusterHead):
             cls_logits, labels, label_weights, avg_factor=cls_avg_factor)
 
         # regression loss
-        pos_inds = ((labels >= 0)& (labels < num_task_classes)).nonzero(as_tuple=False).reshape(-1)
+        pos_inds = ((labels >= 0)& (labels < num_task_classes)).nonzero(as_tuple=False).reshape(-1)  # 通过这个筛选pos
         num_pos = len(pos_inds)
 
         pos_reg_preds = reg_preds[pos_inds]
@@ -260,13 +277,30 @@ class SparseClusterHeadV2(SparseClusterHead):
             if gt_box_type == 1:
                 loss_center, loss_size, loss_rot, loss_vel = self.get_reg_loss_3d(pos_reg_preds, pos_bbox_targets, pos_bbox_weights, reg_avg_factor)
             elif gt_box_type == 2:
-                loss_center, loss_size, loss_rot, loss_centerness = self.get_reg_loss_2d(pos_reg_preds, pos_bbox_targets, pos_bbox_weights, reg_avg_factor, pos_cluster_xyz, img_metas, pos_cluster_batch_idx)
+                # with geometry loss
+                if lidar_density_targets is not None:
+                    pos_lidar_density = lidar_density_targets[pos_inds]
+                    pos_roi_points = roi_points_targets[pos_inds]
+
+                    loss_center, loss_size, loss_rot, loss_centerness, loss_dis_error, loss_ray_tracing, loss_density_center= self.get_reg_loss_2d(pos_reg_preds, 
+                        pos_bbox_targets, pos_bbox_weights, reg_avg_factor, pos_cluster_xyz, img_metas, pos_cluster_batch_idx, task_id,
+                        pos_lidar_density, pos_roi_points)
+                # no geometry loss
+                else:
+                    loss_center, loss_size, loss_rot, loss_centerness, loss_dis_error, loss_ray_tracing, loss_density_center = self.get_reg_loss_2d(pos_reg_preds, 
+                        pos_bbox_targets, pos_bbox_weights, reg_avg_factor, pos_cluster_xyz, img_metas, pos_cluster_batch_idx, task_id)
         else:
             loss_center = pos_reg_preds.sum() * 0
             loss_size = pos_reg_preds.sum() * 0
             loss_rot = pos_reg_preds.sum() * 0
             if self.loss_vel is not None:
                 loss_vel = pos_reg_preds.sum() * 0
+            if lidar_density is not None:
+                loss_dis_error = pos_reg_preds.sum() * 0
+                loss_ray_tracing = pos_reg_preds.sum() * 0
+                loss_density_center = pos_reg_preds.sum() * 0
+            if self.loss_centerness is not None:
+                loss_centerness = pos_reg_preds.sum() * 0
         
         losses = dict(
             loss_cls=loss_cls,
@@ -288,6 +322,11 @@ class SparseClusterHeadV2(SparseClusterHead):
             losses['max_iou'] = iou_labels.max()
             losses['mean_iou'] = iou_labels[iou_labels > 0].mean()
         
+        if lidar_density is not None:
+            losses['loss_dis_error'] = loss_dis_error
+            losses['loss_ray_tracing'] = loss_ray_tracing
+            losses['loss_density_center'] = loss_density_center
+
         losses_with_task_id = {k + '.task' + str(task_id): v for k, v in losses.items()}
 
         return losses_with_task_id
@@ -320,7 +359,17 @@ class SparseClusterHeadV2(SparseClusterHead):
 
         return loss_center, loss_size, loss_rot, loss_vel
 
-    def get_reg_loss_2d(self, pos_reg_preds, pos_bbox_targets, pos_bbox_weights, reg_avg_factor, pos_cluster_xyz, img_metas, pos_cluster_batch_idx):
+    def get_reg_loss_2d(self,
+                        pos_reg_preds,
+                        pos_bbox_targets,
+                        pos_bbox_weights,
+                        reg_avg_factor,
+                        pos_cluster_xyz,
+                        img_metas,
+                        pos_cluster_batch_idx,
+                        task_id,
+                        lidar_density=None,
+                        roi_points=None):
         """
         pos_reg_preds:    (Np, 8) dx,dy,dz,log(l+eps),log(w+wps),log(h+eps),sin(yaw),cos(yaw)
         pos_bbox_targets: (Np, 6) du,dv,dw,dh,sin(yaw),cos(yaw)
@@ -328,7 +377,7 @@ class SparseClusterHeadV2(SparseClusterHead):
         avg_factor:        Np
         pos_cluster_xyz:  (Np, 3)
         img_metas:
-        """        
+        """
         batch_size = len(img_metas)
         nums = pos_reg_preds.shape[0]
         device = pos_bbox_targets.device
@@ -386,18 +435,65 @@ class SparseClusterHeadV2(SparseClusterHead):
             loss_centerness = self.loss_centerness(
 
             )
+        loss_dis_error = 0
+        loss_ray_tracing = 0
+        loss_density_center = 0
+        if lidar_density is not None:
+            wl = [min(self.anchor_size[task_id][0:2]), max(self.anchor_size[task_id][0:2])]
+            wl = torch.tensor(wl, device=roi_points.device)
+            Ry = torch.atan2(pos_bbox_targets[:, 4], pos_bbox_targets[:, 5])    # (pos_cluster_nums, 1)
+            # 下面是转成了weakm3d的参考系下计算loss
+            pred_bev_center = torch.stack((-xyz[:,1], xyz[:,0]),dim=1)          # (pos_cluster_nums, 2)
+            h = xyz[:,2]
+            ori_batch_roi_points = torch.stack((-roi_points[:, :, 1], roi_points[:,:,0]), dim=2)  # # (pos_cluster_nums, sample_points=100, 2)
+            loss_dis_error, loss_ray_tracing, loss_density_center = self.get_geometry_loss(wl, Ry, ori_batch_roi_points, lidar_density, pred_bev_center, h)
 
-        return loss_center, loss_size, loss_rot, loss_centerness
+        return loss_center, loss_size, loss_rot, loss_centerness, loss_dis_error, loss_ray_tracing, loss_density_center
 
-    def modify_gt_for_single_task(self, gt_bboxes_3d, gt_labels_3d, task_id, gt_box_type):
+    def get_geometry_loss(self, wl, Ry, ori_batch_roi_points, density, bev_box_center, h):
+        pos_cluster_nums = Ry.shape[0]
+        assert pos_cluster_nums == len(density) == len(bev_box_center) == len(ori_batch_roi_points)
+        loss_dis_error, loss_ray_tracing, loss_density_center = 0, 0, 0
+
+        for i in range(pos_cluster_nums):
+            if bev_box_center[i][1] > 3:
+                ray_tracing_loss = calc_dis_ray_tracing(wl, Ry[i], ori_batch_roi_points[i], density[i], bev_box_center[i])
+            else:
+                ray_tracing_loss = 0
+
+            shift_depth_points = torch.stack([ori_batch_roi_points[i][:, 0] - bev_box_center[i][0],
+                                              ori_batch_roi_points[i][:, 1] - bev_box_center[i][1]], dim=1)
+            dis_error = calc_dis_rect_object_centric(wl, Ry[i], shift_depth_points, density[i])
+            
+            loss_ray_tracing += ray_tracing_loss
+            loss_dis_error += dis_error
+
+            # '''center_loss'''
+            center_loss = torch.mean(torch.abs(shift_depth_points[:, 0]) / density[i]) + \
+                        torch.mean(torch.abs(shift_depth_points[:, 1]) / density[i])
+            loss_density_center += 0.1 * center_loss
+
+        return loss_dis_error/pos_cluster_nums, loss_ray_tracing/pos_cluster_nums, loss_density_center/pos_cluster_nums
+
+    def modify_gt_for_single_task(self, gt_bboxes_3d, gt_labels_3d, lidar_density, roi_points, task_id, gt_box_type):
         out_bboxes_list, out_labels_list = [], []
-        for gts_b, gts_l in zip(gt_bboxes_3d, gt_labels_3d):
-            out_b, out_l = self.modify_gt_for_single_task_single_sample(gts_b, gts_l, task_id, gt_box_type)
-            out_bboxes_list.append(out_b)
-            out_labels_list.append(out_l)
-        return out_bboxes_list, out_labels_list
+        if lidar_density is not None:
+            out_density_list, out_roi_points_list = [], []
+            for gts_b, gts_l, gts_d, gts_roi in zip(gt_bboxes_3d, gt_labels_3d, lidar_density, roi_points):
+                out_b, out_l, out_d, out_roi = self.modify_gt_for_single_task_single_sample(gts_b, gts_l, task_id, gt_box_type, gts_d, gts_roi)
+                out_bboxes_list.append(out_b)
+                out_labels_list.append(out_l)
+                out_density_list.append(out_d)
+                out_roi_points_list.append(out_roi)
+            return out_bboxes_list, out_labels_list, out_density_list, out_roi_points_list
+        else:
+            for gts_b, gts_l in zip(gt_bboxes_3d, gt_labels_3d):
+                out_b, out_l, _, _ = self.modify_gt_for_single_task_single_sample(gts_b, gts_l, task_id, gt_box_type)
+                out_bboxes_list.append(out_b)
+                out_labels_list.append(out_l)
+            return out_bboxes_list, out_labels_list, None, None
     
-    def modify_gt_for_single_task_single_sample(self, gt_bboxes_3d, gt_labels_3d, task_id, gt_box_type):
+    def modify_gt_for_single_task_single_sample(self, gt_bboxes_3d, gt_labels_3d, task_id, gt_box_type, lidar_density=None, roi_points=None):
         # assert gt_bboxes_3d.tensor.size(0) == gt_labels_3d.size(0)
         if gt_labels_3d.size(0) == 0:
             return gt_bboxes_3d, gt_labels_3d
@@ -407,19 +503,33 @@ class SparseClusterHeadV2(SparseClusterHead):
         num_classes_this_task = len(class_names_this_task)
         out_gt_bboxes_list = []
         out_labels_list = []
+        if lidar_density is not None:
+            out_density_list, out_roi_points_list = [], []
+
         for i, name in enumerate(class_names_this_task):
             cls_id = self.class_names.index(name)
             this_cls_mask = gt_labels_3d == cls_id
             out_gt_bboxes_list.append(gt_bboxes_3d[this_cls_mask])
             out_labels_list.append(gt_labels_3d.new_ones(this_cls_mask.sum()) * i)  # 这个地方赋0的 i一直是0
+            if lidar_density is not None:
+                out_density_list.append(lidar_density[this_cls_mask])
+                out_roi_points_list.append(roi_points[this_cls_mask])
+
         if gt_box_type == 1:
             out_gt_bboxes_3d = gt_bboxes_3d.cat(out_gt_bboxes_list)
         elif gt_box_type == 2:
             out_gt_bboxes_3d = torch.cat(out_gt_bboxes_list, dim=0)
         out_labels = torch.cat(out_labels_list, dim=0)
+
         if len(out_labels) > 0:
             assert out_labels.max().item() < num_classes_this_task
-        return out_gt_bboxes_3d, out_labels
+
+        if lidar_density is not None:
+            out_density = torch.cat(out_density_list, dim=0)
+            out_roi_points = torch.cat(out_roi_points_list, dim=0)
+            return out_gt_bboxes_3d, out_labels, out_density, out_roi_points
+        else:
+            return out_gt_bboxes_3d, out_labels, None, None
 
     def get_targets(self,
                     num_task_classes,
@@ -429,9 +539,11 @@ class SparseClusterHeadV2(SparseClusterHead):
                     gt_labels_3d,
                     reg_preds=None,
                     gt_box_type=1,
-                    img_metas=None,):
+                    img_metas=None,
+                    lidar_density=None, 
+                    roi_points=None):
         batch_size = len(gt_bboxes_3d)
-        cluster_xyz_list = self.split_by_batch(cluster_xyz, batch_idx, batch_size)
+        cluster_xyz_list = self.split_by_batch(cluster_xyz, batch_idx, batch_size)  # 将聚类中心依据batch_idx划分成batch表示
 
         if reg_preds is not None:
             reg_preds_list = self.split_by_batch(reg_preds, batch_idx, batch_size)
@@ -440,9 +552,12 @@ class SparseClusterHeadV2(SparseClusterHead):
 
         num_task_class_list = [num_task_classes,] * len(cluster_xyz_list)
         gt_box_type_list = [gt_box_type for i in range(batch_size)]
-        target_list_per_sample = multi_apply(self.get_targets_single, num_task_class_list, cluster_xyz_list, gt_bboxes_3d, gt_labels_3d, reg_preds_list, gt_box_type_list, img_metas)
+        target_list_per_sample = multi_apply(self.get_targets_single, num_task_class_list, 
+                                             cluster_xyz_list, gt_bboxes_3d, gt_labels_3d, 
+                                             reg_preds_list, gt_box_type_list, img_metas,
+                                             lidar_density, roi_points)
         targets = [self.combine_by_batch(t, batch_idx, batch_size) for t in target_list_per_sample]
-        # targets == [labels, label_weights, bbox_targets, bbox_weights]
+        # targets == [labels, label_weights, bbox_targets, bbox_weights, lidar_density_targets, roi_points_targets]
         return targets
 
     def get_targets_single(self,
@@ -453,6 +568,8 @@ class SparseClusterHeadV2(SparseClusterHead):
                            reg_preds=None,
                            gt_box_type=1,
                            img_metas=None,
+                           lidar_density=None,
+                           roi_points=None
                            ):
         """Generate targets of vote head for single batch.
 
@@ -506,7 +623,16 @@ class SparseClusterHeadV2(SparseClusterHead):
         else:
             iou_labels = None
 
-        return labels, label_weights, bbox_targets, bbox_weights, iou_labels
+        # lidar_density and roi_points targets
+        if lidar_density is not None:
+            lidar_density_targets = cluster_xyz.new_zeros((num_cluster, lidar_density.shape[1]))
+            roi_points_targets = cluster_xyz.new_zeros((num_cluster, roi_points.shape[1], roi_points.shape[2]))
+            lidar_density_targets[pos_inds] = lidar_density[sample_result.pos_assigned_gt_inds]
+            roi_points_targets[pos_inds] = roi_points[sample_result.pos_assigned_gt_inds]
+        else:
+            lidar_density_targets, roi_points_targets = None, None
+
+        return labels, label_weights, bbox_targets, bbox_weights, iou_labels, lidar_density_targets, roi_points_targets
     
         # generate votes target
     def enlarge_gt_bboxes(self, gt_bboxes_3d, gt_labels_3d=None):

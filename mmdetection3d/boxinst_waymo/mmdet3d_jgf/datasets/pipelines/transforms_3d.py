@@ -759,7 +759,7 @@ class GetOrientation:
             depth_points_np_xy = depth_points_sample[:, [0, 1]]  # 获得当前2d框内的点云的xy坐标
 
             '''orient'''
-            orient_set = [(i[0] - j[0]) / (i[1] - j[1]) for j in depth_points_np_xy
+            orient_set = [(i[0] - j[0]) / - (i[1] - j[1]) for j in depth_points_np_xy  # 这里的y轴反向了一下，方便队长weakm3d
                           for i in depth_points_np_xy]  # 斜率，存在nan值，分母为0
             orient_sort = np.array(sorted(np.array(orient_set).reshape(-1)))
             orient_sort = np.arctan(orient_sort[~np.isnan(orient_sort)])  # 过滤掉nan值，然后得到角度 [-pi/2,pi/2]
@@ -770,13 +770,22 @@ class GetOrientation:
                 orient = set_orenit[ind]
                 if orient < 0:  # 角度是钝角时，＜0，需要加上pi,变换到正方向
                     orient += np.pi
+                
+                # weakm3d提到车的行驶方向通常是45度到135度，所以要转一下
+                # if orient > np.pi / 2 + np.pi * 3 / 8:
+                #     orient -= np.pi / 2
+                # if orient < np.pi / 8:
+                #     orient += np.pi / 2
 
-                orient = np.pi/2 - orient  # 转到wamoy坐标系下，yaw的定义
-                if np.max(RoI_points[i][:, 1]) - np.min(RoI_points[i][:, 1]) < self.th_dx:  # 如果小于dx阈值，则说明方向垂直于当前的orient
-                    if orient > 0:
-                        orient = orient - np.pi/2
+                if np.max(RoI_points[i][:, 1]) - np.min(RoI_points[i][:, 1]) > self.th_dx and \
+                        (orient >= np.pi / 8 and orient <= np.pi / 2 + np.pi * 3 / 8):
+                    if orient < np.pi / 2:
+                        orient += np.pi / 2
                     else:
-                        orient = orient + np.pi/2
+                        orient -= np.pi / 2
+                    # 这一步出来的是kitti下的yaw角范围是[0, pi]
+                # 转到wamoy坐标系下，yaw [-pi/2, pi/2]
+                orient = orient - np.pi/2
             except:
                 orient = 0  # 如果np.argmax得不到值，就默认为沿x轴方向
             batch_lidar_orient[i] = orient

@@ -546,6 +546,7 @@ class MultiModalAutoLabel(Base3DDetector):
                       gt_semantic_seg=None,
                       gt_yaw=None,
                       lidar_density=None,
+                      roi_points=None,
                       ):
         """Forward training function.
 
@@ -614,8 +615,6 @@ class MultiModalAutoLabel(Base3DDetector):
                 gt_bboxes_3d = gt_bboxes
                 gt_labels_3d = gt_labels
                 points = self.scale_cp_cor(points, img_metas) # 提前将3d对应的2d坐标，根据输入图片resize大小来放缩
-                gt_yaw = gt_yaw
-                lidar_density = lidar_density  # 待定
             rpn_outs = self.forward_pts_train(points,
                                                 img_metas,
                                                 gt_bboxes_3d,
@@ -623,6 +622,8 @@ class MultiModalAutoLabel(Base3DDetector):
                                                 gt_bboxes_ignore,
                                                 runtime_info,
                                                 pts_semantic_mask,
+                                                lidar_density,
+                                                roi_points
                                                 )
             losses.update(rpn_outs['rpn_losses'])
 
@@ -666,6 +667,8 @@ class MultiModalAutoLabel(Base3DDetector):
                           gt_bboxes_ignore=None,
                           runtime_info=None,
                           pts_semantic_mask=None,
+                          lidar_density=None,  # (B, sample_roi_points)
+                          roi_points=None      # (B, sample_roi_points, 3)
                           ):
         """Forward function for point cloud branch.
         """
@@ -696,7 +699,7 @@ class MultiModalAutoLabel(Base3DDetector):
             dict_to_sample = self.pre_voxelize(dict_to_sample)
         sampled_out = self.sample(dict_to_sample, dict_to_sample['vote_offsets'], gt_bboxes_3d, gt_labels_3d) # per cls list in sampled_out
 
-        # we filter almost empty voxel in clustering, so here is a valid_mask
+        # we filter almost empty voxel in clustering, so here is a valid_mask 
         pts_cluster_inds, valid_mask_list = self.cluster_assigner(sampled_out['center_preds'], sampled_out['batch_idx'], gt_bboxes_3d, gt_labels_3d,  origin_points=sampled_out['seg_points']) # per cls list
         if isinstance(pts_cluster_inds, list):
             pts_cluster_inds = torch.cat(pts_cluster_inds, dim=0) #[N, 3], (cls_id, batch_idx, cluster_id)
@@ -723,8 +726,10 @@ class MultiModalAutoLabel(Base3DDetector):
         outs = self.pts_bbox_head(cluster_feats, cluster_xyz, cluster_inds)
         loss_inputs = (outs['cls_logits'], outs['reg_preds']) + (cluster_xyz, cluster_inds) + (gt_bboxes_3d, gt_labels_3d, img_metas)
         det_loss = self.pts_bbox_head.loss(
-            *loss_inputs, iou_logits=outs.get('iou_logits', None), gt_bboxes_ignore=gt_bboxes_ignore, gt_box_type=self.gt_box_type)
-        
+            *loss_inputs, iou_logits=outs.get('iou_logits', None), 
+            gt_bboxes_ignore=gt_bboxes_ignore, gt_box_type=self.gt_box_type,
+            lidar_density=lidar_density, roi_points=roi_points
+            )
         if hasattr(self.pts_bbox_head, 'print_info'):
             self.print_info.update(self.pts_bbox_head.print_info)
         losses.update(det_loss)
@@ -1573,7 +1578,7 @@ class ClusterAssigner(torch.nn.Module):
 
     @torch.no_grad()
     def forward(self, points_list, batch_idx_list, gt_bboxes_3d=None, gt_labels_3d=None, origin_points=None):
-        gt_bboxes_3d = None 
+        gt_bboxes_3d = None
         gt_labels_3d = None
         assert self.num_classes == len(self.class_names)
         cluster_inds_list, valid_mask_list = \

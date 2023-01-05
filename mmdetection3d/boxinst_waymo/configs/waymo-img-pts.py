@@ -81,7 +81,8 @@ train_pipeline = [
     dict(
         type='Collect3D', 
         keys=['img', 'gt_bboxes', 'gt_labels',  # 'gt_semantic_seg', 'gt_masks',
-              'points', 'gt_bboxes_3d', 'gt_labels_3d', 'gt_yaw', 'lidar_density'],  # 'pts_semantic_mask'
+              'points', 'gt_bboxes_3d', 'gt_labels_3d', # 'pts_semantic_mask'
+              'gt_yaw', 'lidar_density', 'roi_points'],  
         meta_keys=['filename','img_shape','ori_shape','pad_shape',
             'scale','scale_factor','keep_ratio','lidar2img',
             'sample_idx','img_info','ann_info','pts_info',
