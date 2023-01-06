@@ -649,3 +649,125 @@ def calc_dis_ray_tracing(wl, Ry, points, density, bev_box_center):
 
     dis_mean = torch.mean(dis)
     return dis_mean
+
+def ground_segmentation(ori_data):
+    """RANSAC remov ground points
+    输入：
+        data: 一帧完整点云
+    输出：
+        segmengted_cloud: 删除地面点之后的点云
+    """
+    #初始化数据
+    data = ori_data[:,0:3]
+    idx_segmented = []
+    segmented_cloud = []
+    iters = 100   #最大迭代次数  000002.bin：10
+    sigma = 0.4   #数据和模型之间可接受的最大差值
+    ##最好模型的参数估计和内点数目,平面表达方程为   aX + bY + cZ +D= 0
+    best_a = 0
+    best_b = 0
+    best_c = 0
+    best_d = 0
+    pretotal = 0 #上一次inline的点数
+    #希望的到正确模型的概率
+    P = 0.99
+    n = len(data)    #点的数目
+    outline_ratio = 0.6   #e :outline_ratio   000002.bin：0.6    000001.bin: 0.5  000000.bin: 0.6   002979.bin：0.6
+    for i in range(iters):
+        ground_cloud = []
+        idx_ground = []
+        #step1 选择可以估计出模型的最小数据集，对于平面拟合来说，就是三个点
+        sample_index = random.sample(range(n),3)    #重数据集中随机选取3个点
+        point1 = data[sample_index[0]]
+        point2 = data[sample_index[1]]
+        point3 = data[sample_index[2]]
+        #step2 求解模型
+        ##先求解法向量
+        point1_2 = (point1-point2)      #向量 poin1 -> point2
+        point1_3 = (point1-point3)      #向量 poin1 -> point3
+        N = np.cross(point1_3,point1_2)            #向量叉乘求解 平面法向量
+        ##slove model 求解模型的a,b,c,d
+        a = N[0]
+        b = N[1]
+        c = N[2]
+        d = -N.dot(point1)
+        #step3 将所有数据带入模型，计算出“内点”的数目；(累加在一定误差范围内的适合当前迭代推出模型的数据)
+        total_inlier = 0
+        pointn_1 = (data - point1)    #sample（三点）外的点 与 sample内的三点其中一点 所构成的向量
+        distance = abs(pointn_1.dot(N))/ np.linalg.norm(N)     #求距离
+        ##使用距离判断inline
+        idx_ground = (distance <= sigma)
+        total_inlier = np.sum(idx_ground == True)    #统计inline得点数
+        ##判断当前的模型是否比之前估算的模型
+        if total_inlier > pretotal:                                           #     log(1 - p)
+            iters = np.log(1 - P) / np.log(1 - pow(total_inlier / n, 3))  #N = ------------
+            pretotal = total_inlier                                               #log(1-[(1-e)**s])
+            #获取最好得 abcd 模型参数
+            best_a = a
+            best_b = b
+            best_c = c
+            best_d = d
+
+        # 判断是否当前模型已经符合超过 inline_ratio
+        if total_inlier > n*(1-outline_ratio):
+            break
+    # print("iters = %f" %iters)
+    #提取分割后得点
+    idx_segmented = np.logical_not(idx_ground)
+    ground_cloud = ori_data[idx_ground]
+    segmented_cloud = ori_data[idx_segmented]
+    return ground_cloud, segmented_cloud
+
+###################################################
+# FGR 论文中的RANSAC没法用， 不知道哪里的参数设置有问题
+###################################################
+def check_parallel(points):
+    a = np.linalg.norm(points[0] - points[1])
+    b = np.linalg.norm(points[1] - points[2])
+    c = np.linalg.norm(points[2] - points[0])
+    p = (a + b + c) / 2
+    
+    area = np.sqrt(p * (p - a) * (p - b) * (p - c))
+    if area < 1e-2:
+        return True
+    else:
+        return False
+
+def fitPlane(points):
+    if points.shape[0] == points.shape[1]:
+        return np.linalg.solve(points, np.ones(points.shape[0]))
+    else:
+        return np.linalg.lstsq(points, np.ones(points.shape[0]))[0]
+
+def calculate_ground(points, thresh_ransac=0.15,):
+    """RANSAC remov ground points"""
+    # waymo 坐标系下
+    point_cloud = points[:, 0:3]
+
+    planeDiffThreshold = thresh_ransac
+    temp = np.sort(point_cloud[:,2])[int(point_cloud.shape[0] * 0.25)]
+    cloud = point_cloud[point_cloud[:,2] < temp]
+    points_np = point_cloud
+    mask_all = np.ones(points_np.shape[0])
+    final_sample_points = None
+    for i in range(5):
+         best_len = 0
+         for iteration in range(min(cloud.shape[0], 100)):
+             sampledPoints = cloud[np.random.choice(np.arange(cloud.shape[0]), size=(3), replace=False)]
+                
+             while check_parallel(sampledPoints) == True:
+                sampledPoints = cloud[np.random.choice(np.arange(cloud.shape[0]), size=(3), replace=False)]
+                continue
+
+             plane = fitPlane(sampledPoints)
+             diff = np.abs(np.matmul(points_np, plane) - np.ones(points_np.shape[0])) / np.linalg.norm(plane)
+             inlierMask = diff < planeDiffThreshold
+             numInliers = inlierMask.sum()
+             if numInliers > best_len and np.abs(np.dot(plane/np.linalg.norm(plane),np.array([0,1,0])))>0.9:
+                 mask_ground = inlierMask
+                 best_len = numInliers
+                 best_plane = plane
+                 final_sample_points = sampledPoints
+         mask_all *= 1 - mask_ground
+
+    return mask_all, final_sample_points

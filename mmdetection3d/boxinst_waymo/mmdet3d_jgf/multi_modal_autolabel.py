@@ -589,15 +589,15 @@ class MultiModalAutoLabel(Base3DDetector):
 
             img_feats = self.extract_img_feat(img=img, img_metas=img_metas)
             losses_img = self.forward_img_train(
-                img,
-                img_feats,
-                points=points,
-                img_metas=img_metas,
-                gt_bboxes=gt_bboxes,
-                gt_labels=gt_labels,
-                gt_bboxes_ignore=gt_bboxes_ignore,
-                gt_masks=gt_masks,
-                proposals=proposals)
+                                                img,
+                                                img_feats,
+                                                points=points,
+                                                img_metas=img_metas,
+                                                gt_bboxes=gt_bboxes,
+                                                gt_labels=gt_labels,
+                                                gt_bboxes_ignore=gt_bboxes_ignore,
+                                                gt_masks=gt_masks,
+                                                proposals=proposals)
             losses.update(losses_img)
 
         # 2. Points Completion

@@ -1,4 +1,5 @@
 import random
+from ...utils import ground_segmentation, calculate_ground
 import torch
 import numpy as np
 from scipy.sparse.csgraph import connected_components  # CCL
@@ -642,6 +643,19 @@ class SampleFrameImage:
 
         return results
 
+@PIPELINES.register_module()
+class RemoveGroundPoints:
+
+    def __init__(self, coord_type):
+        self.coord_type = coord_type
+
+    def __call__(self, results):
+        points = results['points'].tensor.numpy()
+        # RANSAC remove ground points
+        ground_points, segment_points = ground_segmentation(points)
+        points_class = get_points_type(self.coord_type)
+        results['points'] = points_class(segment_points, points_dim=segment_points.shape[-1])  # 实例化，LiDARPoints
+        return results      
 
 @PIPELINES.register_module()
 class FilterPointsByImage:
@@ -672,11 +686,12 @@ class GetOrientation:
     """
     得到2D框内对象的朝向角
     """
-    def __init__(self, gt_box_type=1, sample_roi_points=100, th_dx=4, dist=0.6):
+    def __init__(self, gt_box_type=1, sample_roi_points=100, th_dx=4, dist=0.6, use_geomtry_loss=False):
         self.gt_box_type = gt_box_type
         self.sample_roi_points = sample_roi_points
         self.th_dx = th_dx  # 阈值
         self.dist = dist
+        self.use_geomtry_loss = use_geomtry_loss
 
     def find_connected_componets_single_batch(self, points, dist):
 
@@ -759,7 +774,7 @@ class GetOrientation:
             depth_points_np_xy = depth_points_sample[:, [0, 1]]  # 获得当前2d框内的点云的xy坐标
 
             '''orient'''
-            orient_set = [(i[0] - j[0]) / - (i[1] - j[1]) for j in depth_points_np_xy  # 这里的y轴反向了一下，方便队长weakm3d
+            orient_set = [(i[0] - j[0]) / - (i[1] - j[1]) for j in depth_points_np_xy  # 这里的y轴反向了一下，方便对照weakm3d得到的斜率k值
                           for i in depth_points_np_xy]  # 斜率，存在nan值，分母为0
             orient_sort = np.array(sorted(np.array(orient_set).reshape(-1)))
             orient_sort = np.arctan(orient_sort[~np.isnan(orient_sort)])  # 过滤掉nan值，然后得到角度 [-pi/2,pi/2]
@@ -796,9 +811,10 @@ class GetOrientation:
             batch_lidar_density[i] = np.sum(p_dis < 0.04, axis=1)
 
         results['gt_yaw'] = batch_lidar_orient.astype(np.float32)
-        results['lidar_density'] = batch_lidar_density.astype(np.float32)
-        results['roi_points'] = batch_RoI_points.astype(np.float32)
-        results['y_center'] = batch_lidar_y_center.astype(np.float32)  # 启发式的深度信息
+        if self.use_geomtry_loss:
+            results['lidar_density'] = batch_lidar_density.astype(np.float32)
+            results['roi_points'] = batch_RoI_points.astype(np.float32)
+            # results['y_center'] = batch_lidar_y_center.astype(np.float32)
         return results
 
     def __call__(self, results):

@@ -73,8 +73,9 @@ train_pipeline = [
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     # dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='PointShuffle'),
-    dict(type='FilterPointsByImage',coord_type='LIDAR'),    # 过滤获得投影到当前图片的点云
-    dict(type='GetOrientation',gt_box_type=gt_box_type),# 获得在2d gt内的方向，如果2d box内没有点云，那么丢弃2d box和2d label
+    dict(type='RemoveGroundPoints', coord_type='LIDAR'),
+    dict(type='FilterPointsByImage', coord_type='LIDAR'),    # 过滤获得投影到当前图片的点云
+    dict(type='GetOrientation', gt_box_type=gt_box_type, use_geomtry_loss=False),# 获得在2d gt内的方向，如果2d box内没有点云，那么丢弃2d box和2d label
 
     # To DataContainer
     dict(type='DefaultFormatBundle3D', class_names=class_names),
@@ -82,7 +83,7 @@ train_pipeline = [
         type='Collect3D', 
         keys=['img', 'gt_bboxes', 'gt_labels',  # 'gt_semantic_seg', 'gt_masks',
               'points', 'gt_bboxes_3d', 'gt_labels_3d', # 'pts_semantic_mask'
-              'gt_yaw', 'lidar_density', 'roi_points'],  
+              'gt_yaw', ],#'lidar_density', 'roi_points'
         meta_keys=['filename','img_shape','ori_shape','pad_shape',
             'scale','scale_factor','keep_ratio','lidar2img',
             'sample_idx','img_info','ann_info','pts_info',
@@ -124,7 +125,8 @@ test_pipeline = [
                 sample='random',
                 guide='gt_bboxes',
                 training =False,
-                ),  # random or resample    
+                ),  # random or resample
+            dict(type='RemoveGroundPoints', coord_type='LIDAR'),
             dict(type='DefaultFormatBundle3D', class_names=class_names),
             dict(type='Collect3D', keys=['points','img'])
         ])
@@ -163,7 +165,8 @@ eval_pipeline = [
                 sample='random',
                 guide='gt_bboxes',
                 training =False,
-                ),  # random or resample    
+                ),  # random or resample
+            dict(type='RemoveGroundPoints', coord_type='LIDAR'),
             dict(type='DefaultFormatBundle3D', class_names=class_names),
             dict(type='Collect3D', keys=['points','img'])
         ])    

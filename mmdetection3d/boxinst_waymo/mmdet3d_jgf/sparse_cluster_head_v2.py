@@ -435,9 +435,9 @@ class SparseClusterHeadV2(SparseClusterHead):
             loss_centerness = self.loss_centerness(
 
             )
-        loss_dis_error = 0
-        loss_ray_tracing = 0
-        loss_density_center = 0
+        loss_dis_error = loss_center * 0
+        loss_ray_tracing = loss_center * 0
+        loss_density_center = loss_center * 0
         if lidar_density is not None:
             wl = [min(self.anchor_size[task_id][0:2]), max(self.anchor_size[task_id][0:2])]
             wl = torch.tensor(wl, device=roi_points.device)
@@ -456,10 +456,10 @@ class SparseClusterHeadV2(SparseClusterHead):
         loss_dis_error, loss_ray_tracing, loss_density_center = 0, 0, 0
 
         for i in range(pos_cluster_nums):
-            if bev_box_center[i][1] > 3:
+            if torch.sqrt((bev_box_center[i][0])**2 + (bev_box_center[i][1])**2) > 3:  # 这里是车周围3m的才计算ray_tracing_loss
                 ray_tracing_loss = calc_dis_ray_tracing(wl, Ry[i], ori_batch_roi_points[i], density[i], bev_box_center[i])
             else:
-                ray_tracing_loss = 0
+                ray_tracing_loss = torch.zeros((1), device=Ry[i].device)
 
             shift_depth_points = torch.stack([ori_batch_roi_points[i][:, 0] - bev_box_center[i][0],
                                               ori_batch_roi_points[i][:, 1] - bev_box_center[i][1]], dim=1)
@@ -552,10 +552,16 @@ class SparseClusterHeadV2(SparseClusterHead):
 
         num_task_class_list = [num_task_classes,] * len(cluster_xyz_list)
         gt_box_type_list = [gt_box_type for i in range(batch_size)]
-        target_list_per_sample = multi_apply(self.get_targets_single, num_task_class_list, 
-                                             cluster_xyz_list, gt_bboxes_3d, gt_labels_3d, 
-                                             reg_preds_list, gt_box_type_list, img_metas,
-                                             lidar_density, roi_points)
+        if lidar_density is not None:
+            target_list_per_sample = multi_apply(self.get_targets_single, num_task_class_list, 
+                                                cluster_xyz_list, gt_bboxes_3d, gt_labels_3d, 
+                                                reg_preds_list, gt_box_type_list, img_metas,
+                                                lidar_density, roi_points)
+        else:
+            target_list_per_sample = multi_apply(self.get_targets_single, num_task_class_list, 
+                                                cluster_xyz_list, gt_bboxes_3d, gt_labels_3d, 
+                                                reg_preds_list, gt_box_type_list, img_metas,
+                                                )           
         targets = [self.combine_by_batch(t, batch_idx, batch_size) for t in target_list_per_sample]
         # targets == [labels, label_weights, bbox_targets, bbox_weights, lidar_density_targets, roi_points_targets]
         return targets
@@ -584,7 +590,12 @@ class SparseClusterHeadV2(SparseClusterHead):
             iou_labels = None
             if self.loss_iou is not None:
                 iou_labels = cluster_xyz.new_zeros(0)
-            return labels, label_weights, bbox_targets, bbox_weights, iou_labels
+            if lidar_density is not None:
+                lidar_density_targets = cluster_xyz.new_zeros((num_cluster, lidar_density.shape[1]))
+                roi_points_targets = cluster_xyz.new_zeros((num_cluster, roi_points.shape[1], roi_points.shape[2]))
+            else:
+                lidar_density_targets, roi_points_targets = None, None
+            return labels, label_weights, bbox_targets, bbox_weights, iou_labels, lidar_density_targets, roi_points_targets
 
         valid_gt_mask = gt_labels_3d >= 0
         gt_bboxes_3d = gt_bboxes_3d[valid_gt_mask]
