@@ -296,7 +296,7 @@ class VoteSegHead(Base3DDecodeHead):
                     if extra_width is not None:
                         bboxes = self.enlarged_2d_box_hw(bboxes, extra_width)  # 待完成
                     inbox_inds = get_in_2d_box_inds(points_list[i], bboxes, img_metas[i])
-                    this_label = self.get_point_labels(inbox_inds, bbox_labels)  # (N,)
+                    this_label = self.get_point_labels(inbox_inds, bbox_labels)  # (N,)  #每个点依据在哪个盒子内分配一个标签
                     this_vote_target, vote_mask = self.get_vote_target_2d(inbox_inds, points, bboxes)  # 由于2d box没有几何中心，所以这里的3d几何中心用2dbox内点的平均值
             label_list.append(this_label)
             vote_target_list.append(this_vote_target)
@@ -333,7 +333,7 @@ class VoteSegHead(Base3DDecodeHead):
         return target, vote_mask
     
     def encode_vote_targets(self, delta):
-        return torch.sign(delta) * (delta.abs() ** 0.5)# 就是开根号了，下面的decode_vote_targets又乘回来了 
+        return torch.sign(delta) * (delta.abs() ** 0.5)# 就是开根号了，下面的decode_vote_targets又乘回来了,sign符号函数来保持正负性
     
     def decode_vote_targets(self, preds):
         return preds * preds.abs()

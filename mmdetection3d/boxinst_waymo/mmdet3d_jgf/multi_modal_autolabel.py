@@ -214,10 +214,10 @@ class VoteSegmentor(Base3DSegmentor):
         if not self.only_one_frame_label:
             # multiple frames with label
             sweep_ind = None
-        
+        # labels: B*N,1 vote_targets: B*N,3 vote_mask(bool) B*N,1
         labels, vote_targets, vote_mask = self.segmentation_head.get_targets(points, gt_bboxes_3d, gt_labels_3d, gt_box_type, img_metas)
-
-        neck_out, pts_coors, points = self.extract_feat(points, img_metas)
+        # neck_out(list):[points_feature(N,64+3), bool(N,)]pts_coors: N,4(batch_id,vx,vy,vz) points=input points 没变
+        neck_out, pts_coors, points = self.extract_feat(points, img_metas)  # 提取每个点的特征，这里提取特征是通过体素化提取，然后将体素特征再传播给对应的点
 
         losses = dict()
 
@@ -677,10 +677,10 @@ class MultiModalAutoLabel(Base3DDetector):
         losses = {}
         gt_bboxes_3d = [b[l>=0] for b, l in zip(gt_bboxes_3d, gt_labels_3d)]
         gt_labels_3d = [l[l>=0] for l in gt_labels_3d]
-
+        # seg_points=points(N,3/12)没变, seg_logits(N,3), seg_vote_preds(N,9), vote_preds decode后的偏置offsets(N,9) seg_feats(N,64+3)每个点的特征
         seg_out_dict = self.pts_segmentor(points=points, img_metas=img_metas, gt_bboxes_3d=gt_bboxes_3d, gt_labels_3d=gt_labels_3d, as_subsegmentor=True,
                                     pts_semantic_mask=pts_semantic_mask, gt_box_type=self.gt_box_type)
-
+        # 上述这一步需要强调的是，本身的votesegmentor已经给每个点分配了一个(伪)label进行了监督，反而没有输出
         seg_feats = seg_out_dict['seg_feats']
         if self.train_cfg.get('detach_segmentor', False):
             seg_feats = seg_feats.detach()
@@ -695,34 +695,34 @@ class MultiModalAutoLabel(Base3DDetector):
             batch_idx=seg_out_dict['batch_idx'],
             vote_offsets=seg_out_dict['offsets'].detach(),
         )
-        if self.pts_cfg.get('pre_voxelization_size', None) is not None:
-            dict_to_sample = self.pre_voxelize(dict_to_sample)
+        if self.pts_cfg.get('pre_voxelization_size', None) is not None:  # 可以省略
+            dict_to_sample = self.pre_voxelize(dict_to_sample)  # 体素化从原始点云的N点变成了体素Nv个点
         sampled_out = self.sample(dict_to_sample, dict_to_sample['vote_offsets'], gt_bboxes_3d, gt_labels_3d) # per cls list in sampled_out
 
-        # we filter almost empty voxel in clustering, so here is a valid_mask 
+        # 过滤掉空的voxel然后进行聚类得到每个非空voxel对应的聚类结果list, [(cls_id, batch_idx, cluster_id),(非空,3),(非空,3)]，valid_mask_list(bool)[(topk-Nv,),(topk-Nv,),(topk-Nv,)]
         pts_cluster_inds, valid_mask_list = self.cluster_assigner(sampled_out['center_preds'], sampled_out['batch_idx'], gt_bboxes_3d, gt_labels_3d,  origin_points=sampled_out['seg_points']) # per cls list
         if isinstance(pts_cluster_inds, list):
             pts_cluster_inds = torch.cat(pts_cluster_inds, dim=0) #[N, 3], (cls_id, batch_idx, cluster_id)
-
+        # 得到多少个实例
         num_clusters = len(torch.unique(pts_cluster_inds, dim=0)) * torch.ones((1,), device=pts_cluster_inds.device).float()
         losses['num_clusters'] = num_clusters
-
+        # 去除空的voxel，注意这里的输出结果是经过了两次过滤，一次是得分＞阈值，第二次是去掉空的
         sampled_out = self.update_sample_results_by_mask(sampled_out, valid_mask_list)
 
         combined_out = self.combine_classes(sampled_out, ['seg_points', 'seg_logits', 'seg_vote_preds', 'seg_feats', 'center_preds'])
-
+        # points是前面两次过滤后的点，不同类别下的cat在一块，它对应的batch，cls，cluster_id都存在pts_cluster_inds参数里
         points = combined_out['seg_points']
         pts_feats = torch.cat([combined_out['seg_logits'], combined_out['seg_vote_preds'], combined_out['seg_feats']], dim=1)
         assert len(pts_cluster_inds) == len(points) == len(pts_feats)
         losses['num_fg_points'] = torch.ones((1,), device=points.device).float() * len(points)
-
+        # 第一次 SIR：输出的结果只是实例，实例包含多个点，但是都没有输出，所以最终的长度是小于等于上面的结果的
         extracted_outs = self.extract_pts_feat(points, pts_feats, pts_cluster_inds, img_metas, combined_out['center_preds'])
         cluster_feats = extracted_outs['cluster_feats']
         cluster_xyz = extracted_outs['cluster_xyz']
         cluster_inds = extracted_outs['cluster_inds'] # [class, batch, groups]
-
+        # 最终得到instance的特征、坐标、索引信息
         assert (cluster_inds[:, 0]).max().item() < self.num_classes
-
+        # 得到预测的结果cls, reg.每个输出都是按照类别输出的[(instance,1or8),(instance,1or8),(instacne,1or8)]
         outs = self.pts_bbox_head(cluster_feats, cluster_xyz, cluster_inds)
         loss_inputs = (outs['cls_logits'], outs['reg_preds']) + (cluster_xyz, cluster_inds) + (gt_bboxes_3d, gt_labels_3d, img_metas)
         det_loss = self.pts_bbox_head.loss(
@@ -950,7 +950,7 @@ class MultiModalAutoLabel(Base3DDetector):
         )
         if self.pts_cfg.get('pre_voxelization_size', None) is not None:
             dict_to_sample = self.pre_voxelize(dict_to_sample)
-        sampled_out = self.sample(dict_to_sample, dict_to_sample['vote_offsets'], gt_bboxes_3d, gt_labels_3d) # per cls list in sampled_out
+        sampled_out = self.sample(dict_to_sample, dict_to_sample['vote_offsets'], gt_bboxes_3d, gt_labels_3d) # per cls list in sampled_out 返回每个点加上前面预测的offsets,得到的投票点
 
         # we filter almost empty voxel in clustering, so here is a valid_mask 比较慢，计算量大
         pts_cluster_inds, valid_mask_list = self.cluster_assigner(sampled_out['center_preds'], sampled_out['batch_idx'], gt_bboxes_3d, gt_labels_3d, origin_points=sampled_out['seg_points']) # per cls list
@@ -965,7 +965,7 @@ class MultiModalAutoLabel(Base3DDetector):
         points = combined_out['seg_points']
         pts_feats = torch.cat([combined_out['seg_logits'], combined_out['seg_vote_preds'], combined_out['seg_feats']], dim=1)
         assert len(pts_cluster_inds) == len(points) == len(pts_feats)
-        # 这个函数里面涉及到CCL出实例
+        # 这个函数里面涉及到
         extracted_outs = self.extract_pts_feat(points, pts_feats, pts_cluster_inds, img_metas,  combined_out['center_preds'])
         cluster_feats = extracted_outs['cluster_feats']  # N_instance vector
         cluster_xyz = extracted_outs['cluster_xyz']
@@ -1279,7 +1279,7 @@ class MultiModalAutoLabel(Base3DDetector):
     # SingleStageFSD
     def pre_voxelize(self, data_dict):
         batch_idx = data_dict['batch_idx']
-        points = data_dict['seg_points']
+        points = data_dict['seg_points']  # (N,3or12)
 
         voxel_size = torch.tensor(self.pts_cfg.pre_voxelization_size, device=batch_idx.device)
         pc_range = torch.tensor(self.cluster_assigner.point_cloud_range, device=points.device)
@@ -1288,7 +1288,7 @@ class MultiModalAutoLabel(Base3DDetector):
         coors = torch.cat([batch_idx[:, None], coors], dim=1)
 
         new_coors, unq_inv  = torch.unique(coors, return_inverse=True, return_counts=False, dim=0)
-
+        # 这里体素化，从这里可以获得原始点云对应的voxel
         voxelized_data_dict = {}
         for data_name in data_dict:
             data = data_dict[data_name]
@@ -1346,8 +1346,8 @@ class MultiModalAutoLabel(Base3DDetector):
                 cls_data_list.append(data[fg_mask])
 
             output_dict[data_name] = cls_data_list
-        output_dict['fg_mask_list'] = fg_mask_list
-        output_dict['center_preds'] = center_preds_list
+        output_dict['fg_mask_list'] = fg_mask_list  # list(bool) [(Nv,1),(Nv,1),(Nv,1)]
+        output_dict['center_preds'] = center_preds_list  # list [(fg_mask=True,3),(fg_mask=True,3),(fg_mask=True,3)]
 
         return output_dict
 
