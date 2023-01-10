@@ -1,3 +1,4 @@
+import math
 import random
 from ...utils import ground_segmentation, calculate_ground
 import torch
@@ -605,6 +606,7 @@ class SampleFrameImage:
                     else:
                         results['sample_img_id'].append(i)
                 sample_image_id = random.choice(results['sample_img_id'])
+                sample_image_id = 0  # test阶段，均采样第一张图片
                 results['sample_img_id'] = sample_image_id
         else:
             sample_image_id = random.choice(range(5))
@@ -732,17 +734,98 @@ class GetOrientation:
             # 如果2d框里没有点，那么就过滤掉对应的2d box和label
             if len(in_box_points) == 0:
                 continue
-            out_gt_bboxes.append(gt_bbox)
+            out_gt_bboxes.append(gt_bbox * scale)
             out_gt_labels.append(labels[i])
-            roi_batch_points.append(in_box_points[:,:3])  # only xyz
+            roi_batch_points.append(in_box_points)  # 12
         assert len(roi_batch_points) == len(out_gt_bboxes)
         results['gt_labels'] = np.array(out_gt_labels)
         results['gt_bboxes'] = np.array(out_gt_bboxes)
         return roi_batch_points, results
     
+    def points_assign_by_bboxes(self, results, roi_points):
+        """2D box内的点云存在遮挡,依照距离远近来分配点云到对应的2D box
+        Input: roi_points(list) [ndarray,ndarray,……] length is no empty 2D boxes numbers
+        """
+        all_roi_points = np.concatenate(roi_points, axis=0)
+        all_roi_min_dist = np.ones((len(roi_points))) * 999
+        for i in range(len(roi_points)):
+            single_roi_points = roi_points[i]
+            single_roi_points_dist = np.sqrt(single_roi_points[:, 0]**2 + single_roi_points[:, 1]**2)
+            all_roi_min_dist[i] = np.min(single_roi_points_dist).astype(np.float32)
+        # 解决overlap问题
+        bboxes = results['gt_bboxes']  # gt_box是resize过的
+        bboxes_nums = len(bboxes)
+        # 1. 查找所有盒子的碰撞关系
+        # 相交矩阵
+        all_overlap_mask = np.zeros((bboxes_nums, bboxes_nums, 5))  # 5=[overlap_flag, inter(x1,y1,x2,y2)]
+        for i in range(bboxes_nums):
+            for j in range(bboxes_nums):
+                flag, inter_box = self.if_overlap(bboxes[i], bboxes[j])
+                if flag:
+                    all_overlap_mask[i][j][0] = 1
+                    all_overlap_mask[i][j][1:5] = inter_box
+                else:
+                    all_overlap_mask[i][j][0] = 0
+        # 2. 判断相交的box内的点属于哪个box
+        all_ignore_indx = [[] for _ in range(bboxes_nums)]  # 记录碰撞关系
+        remove_points = []  # 记录删除的点
+        for i in range(bboxes_nums):
+            overlap_mask = all_overlap_mask[i][:, 0]  # 1表示有碰撞，0表示未碰撞
+            overlap_indx = np.where(overlap_mask==1)[0]
+            # 这个放前面是为了避免计算自身的碰撞盒关系
+            for j in range(len(overlap_indx)):
+                all_ignore_indx[overlap_indx[j]].append(i)
+            ignore_indx = all_ignore_indx[i]
+            # 3.获取overlap的盒子区域内的点云，然后选择正确的盒子
+            for j in range(len(overlap_indx)):
+                if overlap_indx[j] not in ignore_indx:
+                    # 3.1 获取相交区域
+                    inter_box = all_overlap_mask[i][overlap_indx[j]][1:5]
+                    # 3.2 找到两个盒子中距离车最近的距离，然后将相交区域的点赋给最近的盒子，去掉远的盒子的相交区域的点
+                    tmp_dist, overlap_dist = all_roi_min_dist[i], all_roi_min_dist[overlap_indx[j]]
+                    # 如果当前的盒子在前面，那么保留当前盒子的点云不动，删除碰撞盒内的相交点云
+                    if tmp_dist < overlap_dist:
+                        eq_mask = np.isin(roi_points[overlap_indx[j]][:,0:3], roi_points[i][:,0:3])  # 维度大小和前一个值相同 np.isin(a1, a2)也就是a1
+                        sum_eq_mask = np.sum(eq_mask,axis=1) == 3  # 过滤掉不是三个坐标值都相等的点
+                        remove_points.append(roi_points[overlap_indx[j]][sum_eq_mask])
+                        roi_points[overlap_indx[j]] = roi_points[overlap_indx[j]][~sum_eq_mask]
+                    # 如果是当前盒子在后面，删除当前盒子的点
+                    else:
+                        eq_mask = np.isin(roi_points[i][:,0:3], roi_points[overlap_indx[j]][:,0:3])
+                        sum_eq_mask = np.sum(eq_mask, axis=1) == 3
+                        remove_points.append(roi_points[i][sum_eq_mask])
+                        roi_points[i] = roi_points[i][~sum_eq_mask]
+        remove_points = np.concatenate(remove_points, axis=0)
+        # 过滤掉空的roi_points
+        out_roi_points = []
+        out_bboxes = []
+        out_labels = []
+        for i in range(len(bboxes)):
+            if len(roi_points[i]) != 0:
+                out_bboxes.append(bboxes[i])
+                out_labels.append(results['gt_labels'][i])
+                out_roi_points.append(roi_points[i])
+        results['gt_labels'] = np.array(out_bboxes)
+        results['gt_bboxes'] = np.array(out_bboxes)
+        results['ori_roi_points'] = out_roi_points  # 这个保存的是处理掉overlap问题后每个box内的点云
+        return out_roi_points, results
+
+    def if_overlap(self, box1, box2):
+
+        min_x1, min_y1, max_x1, max_y1 = box1[0], box1[1], box1[2], box1[3]
+        min_x2, min_y2, max_x2, max_y2 = box2[0], box2[1], box2[2], box2[3]
+
+        top_x, top_y = max(min_x1, min_x2), max(min_y1, min_y2)
+        bot_x, bot_y = min(max_x1, max_x2), min(max_y1, max_y2)
+        
+        if bot_x >= top_x and bot_y >= top_x:
+            return True, np.array([top_x, top_y, bot_x, bot_y])
+        else:
+            return False, np.array([0, 0, 0, 0])
+
     def get_orientation(self, roi_batch_points, results):
         
-        RoI_points = roi_batch_points
+        RoI_points = roi_batch_points  # (N,12)
         gt_bboxes = results['gt_bboxes']
         assert len(roi_batch_points) == len(gt_bboxes) and len(gt_bboxes) == len(results['gt_labels'])
 
@@ -752,8 +835,8 @@ class GetOrientation:
         batch_lidar_density = np.zeros((gt_bboxes.shape[0], self.sample_roi_points), dtype=np.float32)
         
         for i in range(len(roi_batch_points)):
-            
-            c_inds = self.find_connected_componets_single_batch(RoI_points[i], self.dist)
+            # 聚类过滤
+            c_inds = self.find_connected_componets_single_batch(RoI_points[i][:, 0:3], self.dist)
             set_c_inds = list(set(c_inds))
             c_ind = np.argmax([np.sum(c_inds == i) for i in set_c_inds])
             c_mask = c_inds == set_c_inds[c_ind]
@@ -770,7 +853,7 @@ class GetOrientation:
 
             rand_ind = np.random.randint(0, z_ind_points.shape[0], 100)
             depth_points_sample = z_ind_points[rand_ind]
-            batch_RoI_points[i] = depth_points_sample
+            batch_RoI_points[i] = depth_points_sample[:, 0:3]
             depth_points_np_xy = depth_points_sample[:, [0, 1]]  # 获得当前2d框内的点云的xy坐标
 
             '''orient'''
@@ -811,14 +894,15 @@ class GetOrientation:
             batch_lidar_density[i] = np.sum(p_dis < 0.04, axis=1)
 
         results['gt_yaw'] = batch_lidar_orient.astype(np.float32)
+        results['roi_points'] = batch_RoI_points.astype(np.float32)
         if self.use_geomtry_loss:
             results['lidar_density'] = batch_lidar_density.astype(np.float32)
-            results['roi_points'] = batch_RoI_points.astype(np.float32)
             # results['y_center'] = batch_lidar_y_center.astype(np.float32)
         return results
 
     def __call__(self, results):
         if self.gt_box_type == 2:
-            roi_batch_points, results = self.get_in_2d_box_points(results)  # (gt_box的数量, 3)
-            results = self.get_orientation(roi_batch_points, results)
+            roi_points, results = self.get_in_2d_box_points(results)  # (gt_box的数量, 3)
+            roi_points, results = self.points_assign_by_bboxes(results, roi_points)
+            results = self.get_orientation(roi_points, results)
         return results

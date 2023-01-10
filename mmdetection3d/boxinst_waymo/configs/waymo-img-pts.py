@@ -73,8 +73,8 @@ train_pipeline = [
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     # dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='PointShuffle'),
-    dict(type='RemoveGroundPoints', coord_type='LIDAR'),
-    dict(type='FilterPointsByImage', coord_type='LIDAR'),    # 过滤获得投影到当前图片的点云
+    dict(type='RemoveGroundPoints', coord_type='LIDAR'),  # 移除地面点云
+    dict(type='FilterPointsByImage', coord_type='LIDAR'),    # 过滤获得投影到当前图片的点云 获得一张图片
     dict(type='GetOrientation', gt_box_type=gt_box_type, use_geomtry_loss=False),# 获得在2d gt内的方向，如果2d box内没有点云，那么丢弃2d box和2d label
 
     # To DataContainer
