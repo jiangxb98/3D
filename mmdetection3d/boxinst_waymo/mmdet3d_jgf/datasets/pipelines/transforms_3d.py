@@ -14,6 +14,7 @@ from mmdet3d.core.points import get_points_type, BasePoints
 import warnings
 import mmcv
 from PIL import Image
+from skimage.util.shape import view_as_windows
 @PIPELINES.register_module(force=True)
 class ObjectSample(object):
     def __init__(self, db_sampler, sample_2d=False, use_ground_plane=False):
@@ -664,8 +665,10 @@ class FilterPointsByImage:
     """
     The project point cloud is obtained by the Image idx
     """
-    def __init__(self, coord_type):
+    def __init__(self, coord_type, kernel_size=3, threshold_depth=0.5):
         self.coord_type = coord_type
+        self.kernel_size = kernel_size
+        self.threshold_depth = threshold_depth
 
     def _filter_points(self, results):
         points = results['points'].tensor.numpy()
@@ -678,9 +681,53 @@ class FilterPointsByImage:
         results['points'] = points_class(in_img_points, points_dim=in_img_points.shape[-1])  # 实例化，LiDARPoints
 
         return results
+    
+    def grad_guide_filter(self, results):
+        points = results['points'].tensor.numpy()
+        sample_img_id = results['sample_img_id']
+        scale = results['scale_factor'][0]
+        # 1. 获得深度距离图
+        h, w, _ = results['img_shape']
+        depth_img = np.zeros((h, w))
+        img2points = np.ones((h, w)) * -1
+        points_dist = np.sqrt(points[:, 0]**2 + points[:, 1]**2)
+        for i, point in enumerate(points):
+            if point[6] == sample_img_id:
+                x_0 = point[8] * scale
+                y_0 = point[10] * scale
+                depth_img[int(y_0), int(x_0)] = points_dist[i]
+                img2points[int(y_0), int(x_0)] = i
+
+            if point[7] == sample_img_id:
+                x_1 = point[9] * scale
+                y_1 = point[11] * scale
+                depth_img[int(y_1), int(x_1)] = points_dist[i]
+                img2points[int(y_1), int(x_1)] = i
+        # 2.滑动窗口过滤噪声点
+        pad_width = self.kernel_size // 2  # 给深度图四周补0
+        pad_depth_img = np.pad(depth_img, pad_width = pad_width, mode = 'constant', constant_values = 0)
+        # 划分窗口
+        depth_img_windows = view_as_windows(pad_depth_img, (self.kernel_size, self.kernel_size), 1)
+        depth_img_windows_999 = np.copy(depth_img_windows)
+        depth_img_windows_mask = depth_img_windows == 0
+        depth_img_windows_999[depth_img_windows_mask] = 999
+        depth_img_mask = depth_img != 0
+        # 计算梯度关系（相对距离关系）
+        relative_dis = (depth_img - np.min(depth_img_windows_999, axis=(2,3))) / np.max(depth_img_windows, axis=(2,3))
+        relative_dis[~depth_img_mask] = 999  # 999表示空的像素位置
+        points_near_mask = relative_dis < self.threshold_depth
+        # points_far_mask = (relative_dis >= self.threshold_depth) & (relative_dis != 999)
+        # 通过img2points可以获得对应depth_img每个像素点对应的点云的索引
+        near_points_indx = img2points[points_near_mask].astype(np.int)
+        # far_points_indx = img2points[points_far_mask].astype(np.int)
+        points = points[near_points_indx]
+        points_class = get_points_type(self.coord_type)
+        results['points'] = points_class(points, points_dim=points.shape[-1])  # 实例化，LiDARPoints
+        return results
         
     def __call__(self, results):
         results = self._filter_points(results)
+        results = self.grad_guide_filter(results)
         return results
 
 @PIPELINES.register_module()
@@ -746,7 +793,6 @@ class GetOrientation:
         """2D box内的点云存在遮挡,依照距离远近来分配点云到对应的2D box
         Input: roi_points(list) [ndarray,ndarray,……] length is no empty 2D boxes numbers
         """
-        all_roi_points = np.concatenate(roi_points, axis=0)
         all_roi_min_dist = np.ones((len(roi_points))) * 999
         for i in range(len(roi_points)):
             single_roi_points = roi_points[i]
@@ -805,9 +851,10 @@ class GetOrientation:
                 out_bboxes.append(bboxes[i])
                 out_labels.append(results['gt_labels'][i])
                 out_roi_points.append(roi_points[i])
-        results['gt_labels'] = np.array(out_bboxes)
+        results['gt_labels'] = np.array(out_labels)
         results['gt_bboxes'] = np.array(out_bboxes)
         results['ori_roi_points'] = out_roi_points  # 这个保存的是处理掉overlap问题后每个box内的点云
+        # all_roi_points = np.concatenate(out_roi_points, axis=0)
         return out_roi_points, results
 
     def if_overlap(self, box1, box2):
@@ -818,7 +865,7 @@ class GetOrientation:
         top_x, top_y = max(min_x1, min_x2), max(min_y1, min_y2)
         bot_x, bot_y = min(max_x1, max_x2), min(max_y1, max_y2)
         
-        if bot_x >= top_x and bot_y >= top_x:
+        if bot_x >= top_x and bot_y >= top_y:
             return True, np.array([top_x, top_y, bot_x, bot_y])
         else:
             return False, np.array([0, 0, 0, 0])
@@ -830,7 +877,7 @@ class GetOrientation:
         assert len(roi_batch_points) == len(gt_bboxes) and len(gt_bboxes) == len(results['gt_labels'])
 
         batch_RoI_points = np.zeros((gt_bboxes.shape[0], self.sample_roi_points, 3), dtype=np.float32)
-        batch_lidar_y_center = np.zeros((gt_bboxes.shape[0],), dtype=np.float32)  # 启发式的深度信息
+        batch_lidar_y_center = np.zeros((gt_bboxes.shape[0],), dtype=np.float32)  
         batch_lidar_orient = np.zeros((gt_bboxes.shape[0],), dtype=np.float32)
         batch_lidar_density = np.zeros((gt_bboxes.shape[0], self.sample_roi_points), dtype=np.float32)
         
@@ -869,11 +916,11 @@ class GetOrientation:
                 if orient < 0:  # 角度是钝角时，＜0，需要加上pi,变换到正方向
                     orient += np.pi
                 
-                # weakm3d提到车的行驶方向通常是45度到135度，所以要转一下
-                # if orient > np.pi / 2 + np.pi * 3 / 8:
-                #     orient -= np.pi / 2
-                # if orient < np.pi / 8:
-                #     orient += np.pi / 2
+                # weakm3d提到车的行驶方向通常是45度到135度，但如果超过了阈值距离dx，那么就会再回到旧的距离，下面有写判断
+                if orient > np.pi / 2 + np.pi * 3 / 8:
+                    orient -= np.pi / 2
+                if orient < np.pi / 8:
+                    orient += np.pi / 2
 
                 if np.max(RoI_points[i][:, 1]) - np.min(RoI_points[i][:, 1]) > self.th_dx and \
                         (orient >= np.pi / 8 and orient <= np.pi / 2 + np.pi * 3 / 8):
@@ -895,6 +942,7 @@ class GetOrientation:
 
         results['gt_yaw'] = batch_lidar_orient.astype(np.float32)
         results['roi_points'] = batch_RoI_points.astype(np.float32)
+        results['ori_roi_points'] = roi_batch_points
         if self.use_geomtry_loss:
             results['lidar_density'] = batch_lidar_density.astype(np.float32)
             # results['y_center'] = batch_lidar_y_center.astype(np.float32)
@@ -906,3 +954,25 @@ class GetOrientation:
             roi_points, results = self.points_assign_by_bboxes(results, roi_points)
             results = self.get_orientation(roi_points, results)
         return results
+
+def plt_fun(img, points, out_bboxes, sample_idx):
+    # points N,12
+    # bboxes N,4
+    import cv2
+
+    img = img.astype('uint8')
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    for gt_bbox in out_bboxes:
+        cv2.rectangle(img, (int(gt_bbox[0]), int(gt_bbox[1])), (int(gt_bbox[2]), int(gt_bbox[3])), (0, 255, 0), 2)
+
+    for point in points:
+        if point[6] == sample_idx:
+            x_0 = int(point[8]*0.5)
+            y_0 = int(point[10]*0.5)
+            cv2.circle(img, (x_0, y_0), 1, (0, 255, 0), 1)
+        if point[7] == sample_idx:
+            x_1 = int(point[9]*0.5)
+            y_1 = int(point[11]*0.5)
+            cv2.circle(img, (x_1, y_1), 1, (0, 255, 0), 1)
+
+    cv2.imwrite('test_img_{}.jpeg'.format(sample_idx), img)

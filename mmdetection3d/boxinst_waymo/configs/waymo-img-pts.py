@@ -57,7 +57,7 @@ train_pipeline = [
         # img_scale=[(1920,1280),(1920,1280),(1920,1280),(1920,1280),(1920,1280)],
         multiscale_mode='range',
         keep_ratio=True),
-    dict(type='NormalizeMultiViewImage', **img_norm_cfg),
+    # dict(type='NormalizeMultiViewImage', **img_norm_cfg),
     dict(
         type='PadMultiViewImage',
         # size=[(1280, 1920),(1280, 1920),(1280, 1920),
@@ -83,7 +83,7 @@ train_pipeline = [
         type='Collect3D', 
         keys=['img', 'gt_bboxes', 'gt_labels',  # 'gt_semantic_seg', 'gt_masks',
               'points', 'gt_bboxes_3d', 'gt_labels_3d', # 'pts_semantic_mask'
-              'gt_yaw', ],#'lidar_density', 'roi_points'
+              'gt_yaw', 'roi_points'],#'lidar_density'
         meta_keys=['filename','img_shape','ori_shape','pad_shape',
             'scale','scale_factor','keep_ratio','lidar2img',
             'sample_idx','img_info','ann_info','pts_info',
